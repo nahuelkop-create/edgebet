@@ -1,8 +1,10 @@
 import logging
 import os
 import sys
+import threading
 from dotenv import load_dotenv
 
+from flask import Flask, jsonify
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 from telegram.error import Conflict
 
@@ -29,12 +31,36 @@ logging.basicConfig(
 )
 
 
+# Minimal web server so hosting platforms (e.g. Render) detect an open HTTP port
+# and don't kill the process for "timing out" waiting for one. The Telegram bot
+# itself runs in the main thread; this just answers health checks.
+health_app = Flask(__name__)
+
+
+@health_app.get("/")
+def health():
+    return jsonify({"status": "ok"})
+
+
+def _run_web_server():
+    port = int(os.getenv("PORT", "10000"))
+    # threaded=True so concurrent health checks don't block each other; the
+    # reloader is disabled because we're not in the main thread.
+    health_app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
+
+
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
         raise RuntimeError("TELEGRAM_TOKEN no está definido en el entorno")
 
     initialize_db()
+
+    # Start the health-check web server in a daemon thread so the process keeps
+    # an HTTP port open while the Telegram bot polls in the main thread.
+    web_thread = threading.Thread(target=_run_web_server, daemon=True)
+    web_thread.start()
+    print(f"Servidor web de salud escuchando en el puerto {os.getenv('PORT', '10000')}.")
 
     app = ApplicationBuilder().token(token).build()
     app.add_handler(CommandHandler("start", start))
