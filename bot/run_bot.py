@@ -5,7 +5,7 @@ import threading
 from dotenv import load_dotenv
 
 from flask import Flask, jsonify
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, ContextTypes, MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 from telegram.error import Conflict
 
 ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
@@ -24,10 +24,7 @@ from bot.handlers import (
     start,
 )
 from services.database import initialize_db
-from services.notifications import (
-    check_prematch_notifications,
-    check_result_notifications,
-)
+from services.notifications import start_schedulers
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -51,26 +48,6 @@ def _run_web_server():
     # threaded=True so concurrent health checks don't block each other; the
     # reloader is disabled because we're not in the main thread.
     health_app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
-
-
-async def _prematch_job(context: ContextTypes.DEFAULT_TYPE):
-    """Hourly: notify users about fixtures starting within the next 2 hours."""
-    try:
-        sent = await check_prematch_notifications(context.bot)
-        if sent:
-            logging.info("Notificaciones pre-partido enviadas: %s", sent)
-    except Exception:
-        logging.exception("Error en el job de notificaciones pre-partido")
-
-
-async def _results_job(context: ContextTypes.DEFAULT_TYPE):
-    """Every 10 min: resolve finished bets and notify win/loss + balance."""
-    try:
-        resolved = await check_result_notifications(context.bot)
-        if resolved:
-            logging.info("Apuestas resueltas automáticamente: %s", resolved)
-    except Exception:
-        logging.exception("Error en el job de notificaciones de resultado")
 
 
 def main():
@@ -97,17 +74,10 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_bet_callback, pattern="^(?:bet_match_|res_|resw_|resl_)"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Automatic notifications: pre-match analysis (hourly) + bet results (10 min).
-    job_queue = app.job_queue
-    if job_queue is not None:
-        job_queue.run_repeating(_prematch_job, interval=3600, first=30)
-        job_queue.run_repeating(_results_job, interval=600, first=60)
-        print("Jobs de notificaciones programados (pre-partido cada 1h, resultados cada 10min).")
-    else:
-        logging.warning(
-            "JobQueue no disponible: instalá 'python-telegram-bot[job-queue]' para las "
-            "notificaciones automáticas."
-        )
+    # Automatic notifications run in their own daemon threads (threading-based
+    # scheduler): pre-match analysis every 30 min + bet results every 15 min.
+    start_schedulers()
+    print("Schedulers de notificaciones iniciados (threading): pre-partido 30min, resultados 15min.")
 
     print("Bot de Telegram iniciado. Presiona Ctrl+C para detener.")
     try:

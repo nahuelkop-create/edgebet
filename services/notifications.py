@@ -1,17 +1,28 @@
-"""Automatic Telegram notifications.
+"""Automatic Telegram notifications, driven by a threading-based scheduler.
 
-Two periodic jobs, scheduled from run_bot.py via the PTB JobQueue:
+Two background daemon threads (started from run_bot.py via start_schedulers()):
 
-1. Pre-match (hourly): for each of today's fixtures kicking off within the next
-   two hours, send the full Claude analysis to every user once (deduped in DB).
-2. Results (every 10 min): for each pending bet whose fixture has finished,
-   grade it from the real result, message win/loss and update the balance.
-   Picks we can't grade with confidence trigger a one-off "close it manually"
-   nudge instead of a wrong auto-resolution.
+1. Pre-match (every 30 min): for each of today's fixtures kicking off within the
+   next two hours, send the full Claude analysis to every user once (deduped in
+   the DB so it never repeats).
+2. Results (every 15 min): for each pending bet whose fixture has finished,
+   grade it from the real API result, message GANASTE/PERDISTE and update the
+   balance. Picks we can't grade with confidence trigger a one-off "close it
+   manually" nudge instead of a wrong auto-resolution.
+
+Messages are sent with a plain HTTP call to the Telegram Bot API so the threads
+stay completely independent of python-telegram-bot's asyncio event loop.
 """
+import logging
+import os
 import re
+import threading
+import time
 import unicodedata
 from datetime import datetime, timezone
+
+import requests
+from dotenv import load_dotenv
 
 from services.anthropic_client import analyze_match
 from services.football_data import (
@@ -31,8 +42,34 @@ from services.database import (
     mark_result_notified,
 )
 
+load_dotenv()
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
+
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 PRE_MATCH_WINDOW_SECONDS = 2 * 60 * 60  # notify when kickoff is <= 2h away
+PRE_MATCH_INTERVAL = 30 * 60            # scheduler: pre-match check every 30 min
+RESULTS_INTERVAL = 15 * 60             # scheduler: results check every 15 min
+
+
+# --------------------------------------------------------------------------- #
+# Telegram sending (plain HTTP, no event loop)
+# --------------------------------------------------------------------------- #
+
+def send_message(chat_id, text: str) -> bool:
+    """Send a Telegram message via the Bot API. Returns True on success."""
+    if not TELEGRAM_TOKEN:
+        logging.warning("TELEGRAM_TOKEN no definido: no se pueden enviar notificaciones.")
+        return False
+    try:
+        resp = requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage",
+            json={"chat_id": chat_id, "text": text},
+            timeout=15,
+        )
+        return resp.ok
+    except Exception:
+        logging.exception("Fallo enviando mensaje a Telegram (chat %s)", chat_id)
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -59,6 +96,14 @@ def _profit_for(result: str, stake: float, odds: float) -> float:
     if result == "ganada":
         return round(stake * (odds - 1), 2)
     return round(-stake, 2)
+
+
+def _money(amount: float) -> str:
+    """Signed money string: +$875 / -$1000 (drops the decimals when whole)."""
+    sign = "+" if amount >= 0 else "-"
+    value = abs(amount)
+    body = f"{value:.0f}" if value == int(value) else f"{value:.2f}"
+    return f"{sign}${body}"
 
 
 def _first_number(text: str):
@@ -161,10 +206,10 @@ def grade_bet(pick: str, market: str, hg, ag, home_name, away_name, stats=None) 
 
 
 # --------------------------------------------------------------------------- #
-# Job 1: pre-match analysis (hourly)
+# Job 1: pre-match analysis (every 30 min)
 # --------------------------------------------------------------------------- #
 
-async def check_prematch_notifications(bot) -> int:
+def check_prematch_notifications() -> int:
     """Send the full analysis for fixtures starting within 2h. Returns how many
     fixtures were notified (handy for logging/tests)."""
     users = get_all_users()
@@ -190,17 +235,15 @@ async def check_prematch_notifications(bot) -> int:
         try:
             analysis = analyze_match(match)
         except Exception:
-            continue  # try again next hour
+            logging.exception("No se pudo generar el análisis pre-partido (fixture %s)", fixture_id)
+            continue  # try again next run
 
         home = match.get("homeTeam", {}).get("name", "Local")
         away = match.get("awayTeam", {}).get("name", "Visitante")
         mins = int(seconds_to_kickoff // 60)
         header = f"⏰ Empieza en ~{mins} min — {home} vs {away}\n\n"
         for user in users:
-            try:
-                await bot.send_message(chat_id=user["chat_id"], text=header + analysis)
-            except Exception:
-                pass
+            send_message(user["chat_id"], header + analysis)
 
         mark_fixture_notified(fixture_id)
         sent += 1
@@ -209,7 +252,7 @@ async def check_prematch_notifications(bot) -> int:
 
 
 # --------------------------------------------------------------------------- #
-# Job 2: result notifications (every 10 min)
+# Job 2: result notifications (every 15 min)
 # --------------------------------------------------------------------------- #
 
 def _team_names(details: dict, bet: dict):
@@ -223,8 +266,8 @@ def _team_names(details: dict, bet: dict):
     return home, away
 
 
-async def check_result_notifications(bot) -> int:
-    """Resolve finished bets, push win/loss messages and update balances.
+def check_result_notifications() -> int:
+    """Resolve finished bets, push GANASTE/PERDISTE messages and update balances.
     Returns the number of bets resolved automatically."""
     pending = get_all_pending_bets()
     if not pending:
@@ -247,13 +290,12 @@ async def check_result_notifications(bot) -> int:
         goals = details.get("goals", {}) or {}
         hg, ag = goals.get("home"), goals.get("away")
         home_name, away_name = _team_names(details, bet)
-        match_label = bet.get("match_name") or (f"{home_name} vs {away_name}")
+        match_label = bet.get("match_name") or f"{home_name} vs {away_name}"
         chat_id = get_user_chat_id(bet["telegram_user_id"])
-
-        result = grade_bet(bet.get("pick", ""), bet.get("market", ""), hg, ag, home_name, away_name,
-                           get_match_stats(fixture_id))
-
         score_line = f"{home_name} {hg}-{ag} {away_name}"
+
+        result = grade_bet(bet.get("pick", ""), bet.get("market", ""), hg, ag,
+                           home_name, away_name, get_match_stats(fixture_id))
 
         if result in ("ganada", "perdida"):
             profit = _profit_for(result, bet["stake"], bet["odds"])
@@ -262,20 +304,18 @@ async def check_result_notifications(bot) -> int:
             update_monthly_balance(bet["telegram_user_id"], month, profit)
             resolved_count += 1
             if chat_id is not None:
-                emoji = "✅" if result == "ganada" else "❌"
-                verb = "¡Ganaste!" if result == "ganada" else "Perdiste"
-                sign = "+" if profit >= 0 else ""
+                headline = (
+                    f"✅ GANASTE {_money(profit)}" if result == "ganada"
+                    else f"❌ PERDISTE {_money(profit)}"
+                )
                 msg = (
-                    f"{emoji} {verb}\n"
+                    f"{headline}\n"
                     f"{match_label}\n"
                     f"Pick: {bet.get('pick')}\n"
                     f"Resultado final: {score_line}\n"
-                    f"Balance: {sign}{profit:.2f} (mes actualizado)"
+                    f"Balance del mes actualizado."
                 )
-                try:
-                    await bot.send_message(chat_id=chat_id, text=msg)
-                except Exception:
-                    pass
+                send_message(chat_id, msg)
         else:
             # Couldn't grade automatically: nudge the user once to close it.
             if not bet.get("result_notified"):
@@ -287,9 +327,42 @@ async def check_result_notifications(bot) -> int:
                         "No pude calcular este pick automáticamente. "
                         "Cerralo con /resultado para actualizar tu balance."
                     )
-                    try:
-                        await bot.send_message(chat_id=chat_id, text=msg)
-                    except Exception:
-                        pass
+                    send_message(chat_id, msg)
 
     return resolved_count
+
+
+# --------------------------------------------------------------------------- #
+# Threading scheduler (no APScheduler)
+# --------------------------------------------------------------------------- #
+
+def _run_loop(job, interval: int, first_delay: int, label: str):
+    """Run `job` forever every `interval` seconds, swallowing errors so the
+    thread never dies."""
+    time.sleep(first_delay)
+    while True:
+        try:
+            count = job()
+            if count:
+                logging.info("[%s] notificaciones enviadas: %s", label, count)
+        except Exception:
+            logging.exception("[%s] error en el job de notificaciones", label)
+        time.sleep(interval)
+
+
+def start_schedulers():
+    """Launch the two notification loops in daemon threads."""
+    threading.Thread(
+        target=_run_loop,
+        args=(check_prematch_notifications, PRE_MATCH_INTERVAL, 30, "pre-partido"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_run_loop,
+        args=(check_result_notifications, RESULTS_INTERVAL, 60, "resultados"),
+        daemon=True,
+    ).start()
+    logging.info(
+        "Schedulers de notificaciones iniciados (pre-partido cada %smin, resultados cada %smin).",
+        PRE_MATCH_INTERVAL // 60, RESULTS_INTERVAL // 60,
+    )
