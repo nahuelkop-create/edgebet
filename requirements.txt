@@ -1,0 +1,5 @@
+python-telegram-bot>=22.8
+Flask>=2.2
+python-dotenv>=1.0
+requests>=2.31
+anthropic>=0.111.0

@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>EdgeBet Dashboard</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    table { border-collapse: collapse; width: 100%; }
+    th, td { border: 1px solid #ddd; padding: 8px; }
+    th { background: #f4f4f4; }
+  </style>
+</head>
+<body>
+  <h1>EdgeBet Dashboard</h1>
+  <p>Mes actual: {{ month }}</p>
+
+  <h2>Historial de apuestas</h2>
+  <table>
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Usuario</th>
+        <th>Liga</th>
+        <th>Mercado</th>
+        <th>Pick</th>
+        <th>Stake</th>
+        <th>Cuota</th>
+        <th>Resultado</th>
+        <th>Profit</th>
+        <th>Creado</th>
+      </tr>
+    </thead>
+    <tbody>
+    {% for bet in bets %}
+      <tr>
+        <td>{{ bet.id }}</td>
+        <td>{{ bet.username }}</td>
+        <td>{{ bet.league }}</td>
+        <td>{{ bet.market }}</td>
+        <td>{{ bet.pick }}</td>
+        <td>{{ bet.stake }}</td>
+        <td>{{ bet.odds }}</td>
+        <td>{{ bet.result or 'Pendiente' }}</td>
+        <td>{{ bet.profit or '-' }}</td>
+        <td>{{ bet.created_at }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>
