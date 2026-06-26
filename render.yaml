@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: edgebet-bot
+    runtime: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python bot/run_bot.py
+    disk:
+      name: edgebet-data
+      mountPath: /data
+      sizeGB: 1

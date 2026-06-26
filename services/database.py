@@ -2,7 +2,14 @@ import sqlite3
 from datetime import datetime
 from pathlib import Path
 
-DB_PATH = Path(__file__).resolve().parents[0].parent / "data" / "edgebet.db"
+# In production (Render) the persistent disk is mounted at /data, so the SQLite
+# file survives deploys/restarts. Locally that mount doesn't exist, so we fall
+# back to the repo's own data/ folder.
+_RENDER_DISK = Path("/data")
+if _RENDER_DISK.is_dir():
+    DB_PATH = _RENDER_DISK / "edgebet.db"
+else:
+    DB_PATH = Path(__file__).resolve().parents[0].parent / "data" / "edgebet.db"
 DB_PATH.parent.mkdir(parents=True, exist_ok=True)
 
 CREATE_SQL = """
@@ -33,6 +40,26 @@ CREATE TABLE IF NOT EXISTS balance (
 );
 """
 
+# Maps a Telegram user to the chat we send automatic notifications to. Captured
+# on /start. telegram_user_id is the primary key so /start upserts cleanly.
+CREATE_USERS_SQL = """
+CREATE TABLE IF NOT EXISTS users (
+    telegram_user_id INTEGER PRIMARY KEY,
+    chat_id INTEGER NOT NULL,
+    username TEXT,
+    created_at TEXT NOT NULL
+);
+"""
+
+# Records which fixtures already got a pre-match notification so the hourly job
+# never sends the same analysis twice.
+CREATE_NOTIFIED_SQL = """
+CREATE TABLE IF NOT EXISTS notified_fixtures (
+    fixture_id INTEGER PRIMARY KEY,
+    notified_at TEXT NOT NULL
+);
+"""
+
 
 def get_connection():
     conn = sqlite3.connect(DB_PATH)
@@ -52,9 +79,87 @@ def initialize_db():
     with conn:
         conn.execute(CREATE_SQL)
         conn.execute(CREATE_BALANCE_SQL)
-        # Migrate older DBs that predate the match_name column.
+        conn.execute(CREATE_USERS_SQL)
+        conn.execute(CREATE_NOTIFIED_SQL)
+        # Migrate older DBs that predate these columns.
         _ensure_column(conn, "bets", "match_name", "match_name TEXT")
+        # fixture_id links a bet to a real fixture so the results job can grade it.
+        _ensure_column(conn, "bets", "fixture_id", "fixture_id INTEGER")
+        # result_notified marks bets whose match finished but couldn't be graded
+        # automatically, so we only ask the user to close them manually once.
+        _ensure_column(conn, "bets", "result_notified", "result_notified INTEGER DEFAULT 0")
     conn.close()
+
+
+def mark_result_notified(bet_id: int):
+    conn = get_connection()
+    with conn:
+        conn.execute("UPDATE bets SET result_notified = 1 WHERE id = ?", (bet_id,))
+    conn.close()
+
+
+def upsert_user(telegram_user_id: int, chat_id: int, username: str = None):
+    """Store/refresh the chat_id we use to push notifications to a user (/start)."""
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "INSERT INTO users (telegram_user_id, chat_id, username, created_at) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(telegram_user_id) DO UPDATE SET chat_id = excluded.chat_id, "
+            "username = excluded.username",
+            (telegram_user_id, chat_id, username, now),
+        )
+    conn.close()
+
+
+def get_user_chat_id(telegram_user_id: int):
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT chat_id FROM users WHERE telegram_user_id = ?",
+        (telegram_user_id,),
+    ).fetchone()
+    conn.close()
+    return row[0] if row else None
+
+
+def get_all_users():
+    """Every user that has started the bot (for broadcasting pre-match alerts)."""
+    conn = get_connection()
+    rows = conn.execute("SELECT telegram_user_id, chat_id, username FROM users").fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def was_fixture_notified(fixture_id: int) -> bool:
+    conn = get_connection()
+    row = conn.execute(
+        "SELECT 1 FROM notified_fixtures WHERE fixture_id = ?", (fixture_id,)
+    ).fetchone()
+    conn.close()
+    return row is not None
+
+
+def mark_fixture_notified(fixture_id: int):
+    now = datetime.utcnow().isoformat()
+    conn = get_connection()
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO notified_fixtures (fixture_id, notified_at) VALUES (?, ?)",
+            (fixture_id, now),
+        )
+    conn.close()
+
+
+def get_all_pending_bets():
+    """All unresolved bets across users that are linked to a fixture (result job)."""
+    conn = get_connection()
+    rows = conn.execute(
+        "SELECT * FROM bets WHERE result IS NULL AND fixture_id IS NOT NULL "
+        "ORDER BY created_at ASC"
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
 
 
 def add_bet(
@@ -66,15 +171,16 @@ def add_bet(
     stake: float,
     odds: float,
     match_name: str = None,
+    fixture_id: int = None,
 ) -> int:
     """Insert a pending bet (result/profit stay NULL until resolved). Returns the new bet id."""
     now = datetime.utcnow().isoformat()
     conn = get_connection()
     with conn:
         cur = conn.execute(
-            "INSERT INTO bets (telegram_user_id, username, league, market, match_name, pick, stake, odds, created_at) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (telegram_user_id, username, league, market, match_name, pick, stake, odds, now),
+            "INSERT INTO bets (telegram_user_id, username, league, market, match_name, pick, stake, odds, fixture_id, created_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (telegram_user_id, username, league, market, match_name, pick, stake, odds, fixture_id, now),
         )
         bet_id = cur.lastrowid
     conn.close()

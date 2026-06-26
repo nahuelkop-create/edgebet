@@ -14,6 +14,7 @@ from services.database import (
     get_stats,
     resolve_bet,
     update_monthly_balance,
+    upsert_user,
 )
 from services.football_data import (
     get_fixtures_by_date,
@@ -250,6 +251,8 @@ def format_live_stats(match: dict) -> str:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    # Remember the chat so the notification jobs can reach this user.
+    upsert_user(user.id, update.effective_chat.id, user.username or user.first_name)
     text = (
         f"Hola {user.first_name}! Soy EdgeBet Bot.\n\n"
         "Comandos:\n"
@@ -357,6 +360,7 @@ async def handle_bet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             "step": "apuesta_pick",
             "match_name": f"{home} vs {away}",
             "competition": competition,
+            "fixture_id": match.get("id"),
         })
         USER_STATE[user.id] = state
         return await query.edit_message_text(
@@ -490,6 +494,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             stake=state["stake"],
             odds=odds,
             match_name=state.get("match_name"),
+            fixture_id=state.get("fixture_id"),
         )
         USER_STATE.pop(user.id, None)
         return await update.message.reply_text(
