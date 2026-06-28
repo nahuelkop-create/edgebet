@@ -1,3 +1,4 @@
+import json
 import os
 import re
 import unicodedata
@@ -24,6 +25,56 @@ def create_client():
     if not ANTHROPIC_API_KEY:
         raise RuntimeError("ANTHROPIC_API_KEY no está definido")
     return anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
+BET_IMAGE_PROMPT = (
+    "Analizá esta captura de apuesta deportiva y extraé: partido, picks apostados, "
+    "monto apostado y cuota total. Respondé SOLO en JSON así: "
+    '{"partido": "...", "picks": ["...", "..."], "monto": 1000, "cuota": 2.50}'
+)
+
+
+def _extract_json(text: str) -> dict:
+    """Pull the JSON object out of Claude's reply, tolerating ```json fences."""
+    start = text.find("{")
+    end = text.rfind("}")
+    if start == -1 or end == -1 or end < start:
+        raise ValueError(f"No se encontró JSON en la respuesta: {text[:200]}")
+    return json.loads(text[start : end + 1])
+
+
+def analyze_bet_image(image_base64: str, media_type: str = "image/jpeg") -> dict:
+    """Send a betting-slip screenshot to Claude Vision and return the parsed bet.
+
+    Returns a dict with keys: partido (str), picks (list[str]), monto (number),
+    cuota (number). Raises on API/parse errors.
+    """
+    client = create_client()
+    response = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": image_base64,
+                        },
+                    },
+                    {"type": "text", "text": BET_IMAGE_PROMPT},
+                ],
+            }
+        ],
+    )
+
+    if not response.content:
+        raise RuntimeError("Anthropic returned empty content")
+
+    return _extract_json(response.content[0].text.strip())
 
 
 def format_recent_matches(matches: list) -> str:

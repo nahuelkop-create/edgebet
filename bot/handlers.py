@@ -1,11 +1,14 @@
+import base64
 import os
+import re
+import tempfile
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from services.anthropic_client import analyze_match
+from services.anthropic_client import analyze_match, analyze_bet_image
 from services.database import (
     add_bet,
     get_bet,
@@ -450,6 +453,99 @@ async def picks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ---------------------------------------------------------------------------
+# Reconocimiento de apuestas por imagen (Claude Vision)
+# ---------------------------------------------------------------------------
+
+_YES_ANSWERS = {"si", "sí", "s", "yes", "y", "ok", "dale", "confirmar", "confirmo"}
+_NO_ANSWERS = {"no", "n", "cancelar", "cancela", "nop"}
+
+
+def _to_number(value):
+    """Coerce a JSON-extracted amount/odds to float, or None if not parseable."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    try:
+        cleaned = str(value).replace("$", "").replace(",", ".").strip()
+        return float(re.findall(r"-?\d+(?:\.\d+)?", cleaned)[0])
+    except (ValueError, IndexError):
+        return None
+
+
+def _format_money(value) -> str:
+    if value is None:
+        return "N/D"
+    return f"{value:.0f}" if float(value).is_integer() else f"{value:.2f}"
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """A photo arrived: read it with Claude Vision and ask the user to confirm
+    the detected bet before saving it."""
+    user = update.effective_user
+    photos = update.message.photo
+    if not photos:
+        return
+
+    await update.message.reply_text("🔍 Analizando la imagen de tu apuesta...")
+
+    # Largest available size is the last entry. Download it to a temp file and
+    # convert to base64 for Claude Vision.
+    photo = photos[-1]
+    tmp_path = None
+    try:
+        tg_file = await context.bot.get_file(photo.file_id)
+        fd, tmp_path = tempfile.mkstemp(suffix=".jpg")
+        os.close(fd)
+        await tg_file.download_to_drive(custom_path=tmp_path)
+        with open(tmp_path, "rb") as fh:
+            image_b64 = base64.b64encode(fh.read()).decode("utf-8")
+    except Exception:
+        return await update.message.reply_text(
+            "⚠️ No pude descargar la imagen. Probá enviarla de nuevo."
+        )
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+    try:
+        parsed = analyze_bet_image(image_b64, "image/jpeg")
+    except Exception:
+        return await update.message.reply_text(
+            "⚠️ No pude leer la apuesta de la imagen. Probá con una captura más clara."
+        )
+
+    partido = (parsed.get("partido") or "").strip() or "N/D"
+    picks = parsed.get("picks") or []
+    if isinstance(picks, str):
+        picks = [picks]
+    picks = [str(p).strip() for p in picks if str(p).strip()]
+    monto = _to_number(parsed.get("monto"))
+    cuota = _to_number(parsed.get("cuota"))
+
+    USER_STATE[user.id] = {
+        "step": "confirm_image_bet",
+        "image_bet": {
+            "partido": partido,
+            "picks": picks,
+            "monto": monto,
+            "cuota": cuota,
+        },
+    }
+
+    picks_text = ", ".join(picks) if picks else "no detectados"
+    summary = (
+        "📋 Apuesta detectada:\n"
+        f"⚽ Partido: {partido}\n"
+        f"🎯 Picks: {picks_text}\n"
+        f"💰 Monto: ${_format_money(monto)}\n"
+        f"📊 Cuota: {_format_money(cuota)}\n\n"
+        "¿Confirmar registro? (Sí/No)"
+    )
+    return await update.message.reply_text(summary)
+
+
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     state = USER_STATE.get(user.id)
@@ -459,6 +555,38 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
     text = update.message.text.strip()
+
+    # --- Confirmación de apuesta detectada por imagen ---
+    if state["step"] == "confirm_image_bet":
+        answer = text.lower().strip()
+        bet = state.get("image_bet", {})
+        if answer in _YES_ANSWERS:
+            picks = bet.get("picks") or []
+            pick_text = "; ".join(picks) if picks else "N/D"
+            bet_id = add_bet(
+                telegram_user_id=user.id,
+                username=user.username or user.first_name,
+                league="",
+                market="imagen",
+                pick=pick_text,
+                stake=bet.get("monto") or 0,
+                odds=bet.get("cuota") or 0,
+                match_name=bet.get("partido"),
+            )
+            USER_STATE.pop(user.id, None)
+            return await update.message.reply_text(
+                "✅ Apuesta registrada (pendiente)\n"
+                f"#{bet_id}\n"
+                f"Partido: {bet.get('partido', 'N/D')}\n"
+                f"Pick: {pick_text}\n"
+                f"Monto: ${_format_money(bet.get('monto'))}\n"
+                f"Cuota: {_format_money(bet.get('cuota'))}\n\n"
+                "Cerrala con /resultado cuando termine el partido."
+            )
+        if answer in _NO_ANSWERS:
+            USER_STATE.pop(user.id, None)
+            return await update.message.reply_text("❌ Registro cancelado.")
+        return await update.message.reply_text("Respondé Sí o No para confirmar el registro.")
 
     # --- /apuesta flow: pick -> stake -> odds ---
     if state["step"] == "apuesta_pick":

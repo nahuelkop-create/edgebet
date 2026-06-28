@@ -17,6 +17,7 @@ from bot.handlers import (
     balance,
     handle_bet_callback,
     handle_message,
+    handle_photo,
     handle_picks_callback,
     newbet,
     picks,
@@ -72,6 +73,7 @@ def main():
     app.add_handler(CommandHandler("balance", balance))
     app.add_handler(CallbackQueryHandler(handle_picks_callback, pattern="^(?:picks_|match_|prematch_|live_)"))
     app.add_handler(CallbackQueryHandler(handle_bet_callback, pattern="^(?:bet_match_|res_|resw_|resl_)"))
+    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     # Automatic notifications run in their own daemon threads (threading-based
