@@ -152,11 +152,10 @@ def mark_fixture_notified(fixture_id: int):
 
 
 def get_all_pending_bets():
-    """All unresolved bets across users that are linked to a fixture (result job)."""
+    """All unresolved bets across users (result job)."""
     conn = get_connection()
     rows = conn.execute(
-        "SELECT * FROM bets WHERE result IS NULL AND fixture_id IS NOT NULL "
-        "ORDER BY created_at ASC"
+        "SELECT * FROM bets WHERE result IS NULL ORDER BY created_at ASC"
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
