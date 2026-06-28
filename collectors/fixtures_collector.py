@@ -91,7 +91,11 @@ def _upsert_fixture(session, raw: dict[str, Any], league_name: str) -> bool:
 
 
 def collect_upcoming_fixtures() -> int:
-    """Fetch upcoming fixtures for tracked leagues and persist them in PostgreSQL."""
+    """Fetch upcoming fixtures for tracked leagues and persist them in PostgreSQL.
+
+    This collector only writes data. It must never send Telegram notifications;
+    pre-match notifications are handled exclusively by services.notifications.
+    """
     try:
         session = get_session()
     except RuntimeError:

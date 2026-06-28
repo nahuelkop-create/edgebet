@@ -411,17 +411,29 @@ def check_prematch_notifications() -> int:
     now = datetime.now(timezone.utc)
     sent = 0
     for match in get_fixtures_today():
+        fixture_id = match.get("id")
         if str(match.get("status") or "").upper() not in PRE_MATCH_STATUSES:
+            logging.debug(
+                "[pre-partido] fixture %s ignorado por status=%s",
+                fixture_id,
+                match.get("status"),
+            )
             continue
         kickoff = _parse_kickoff(match.get("utcDate"))
         if not kickoff:
+            logging.debug("[pre-partido] fixture %s sin kickoff parseable", fixture_id)
             continue
         seconds_to_kickoff = (kickoff - now).total_seconds()
         if not (0 < seconds_to_kickoff <= PRE_MATCH_WINDOW_SECONDS):
+            logging.debug(
+                "[pre-partido] fixture %s fuera de ventana: %.0fs hasta kickoff",
+                fixture_id,
+                seconds_to_kickoff,
+            )
             continue
 
-        fixture_id = match.get("id")
         if fixture_id is None or was_fixture_notified(fixture_id):
+            logging.debug("[pre-partido] fixture %s ya notificado o inválido", fixture_id)
             continue
 
         try:
@@ -439,6 +451,7 @@ def check_prematch_notifications() -> int:
 
         mark_fixture_notified(fixture_id)
         sent += 1
+        logging.info("[pre-partido] fixture %s notificado a %s usuarios", fixture_id, len(users))
 
     return sent
 
@@ -625,7 +638,8 @@ def _run_loop(job, interval: int, first_delay: int, label: str):
         try:
             count = job()
             if count:
-                logging.info("[%s] notificaciones enviadas: %s", label, count)
+                metric = "items procesados" if label.startswith("collector-") else "notificaciones enviadas"
+                logging.info("[%s] %s: %s", label, metric, count)
         except Exception:
             logging.exception("[%s] error en el job de notificaciones", label)
         time.sleep(interval)

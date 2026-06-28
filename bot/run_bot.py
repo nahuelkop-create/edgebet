@@ -41,6 +41,16 @@ def _run_web_server():
     web_app.run(host="0.0.0.0", port=port, threaded=True, use_reloader=False)
 
 
+async def _log_handler_error(update, context):
+    logging.exception("Excepción no controlada en handler de Telegram. update=%s", update, exc_info=context.error)
+    message = getattr(update, "effective_message", None) if update else None
+    if message:
+        try:
+            await message.reply_text("⚠️ Ocurrió un error procesando el comando. Revisá los logs.")
+        except Exception:
+            logging.exception("No se pudo enviar mensaje de error al usuario.")
+
+
 def main():
     token = os.getenv("TELEGRAM_TOKEN")
     if not token:
@@ -69,6 +79,7 @@ def main():
     app.add_handler(CallbackQueryHandler(handle_bet_callback, pattern="^(?:bet_match_|res_|resw_|resl_)"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    app.add_error_handler(_log_handler_error)
 
     # Automatic notifications and platform collectors run in daemon threads.
     start_schedulers()

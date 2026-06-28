@@ -1,4 +1,5 @@
 import base64
+import logging
 import os
 import re
 import tempfile
@@ -25,6 +26,8 @@ from services.football_data import (
     get_match_stats,
     get_player_stats,
 )
+
+logger = logging.getLogger(__name__)
 
 LEAGUES = [
     "Torneo Argentino / Copa Argentina",
@@ -468,25 +471,31 @@ async def newbet(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def picks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     args = context.args or []
+    chat_id = update.effective_chat.id if update.effective_chat else None
+    logger.info("/picks recibido user_id=%s chat_id=%s args=%s", user.id if user else None, chat_id, args)
 
     if args:
         date_arg = " ".join(args)
         date_str = arg_to_date(date_arg)
+        logger.debug("/picks fecha parseada user_id=%s date_arg=%s date_str=%s", user.id, date_arg, date_str)
         if not date_str:
             return await update.message.reply_text(
                 "Formato inválido. Usa /picks hoy, /picks mañana o /picks YYYY-MM-DD."
             )
         fixtures = get_fixtures_for_date(date_str)
+        logger.info("/picks fixtures user_id=%s date=%s count=%s", user.id, date_str, len(fixtures))
         if not fixtures:
             return await update.message.reply_text(f"No hay partidos disponibles para {date_str}.")
 
         USER_STATE[user.id] = {"step": "picks_select", "fixtures": fixtures, "date": date_str}
+        logger.debug("/picks estado actualizado user_id=%s step=picks_select", user.id)
         await update.message.reply_text(
             format_fixtures_text(fixtures, date_str),
             reply_markup=build_match_buttons(fixtures, date_str),
         )
         return
 
+    logger.debug("/picks mostrando menu user_id=%s", user.id if user else None)
     await update.message.reply_text(
         "Selecciona una opción para ver partidos:",
         reply_markup=build_picks_keyboard(),
@@ -783,12 +792,14 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     if not query:
+        logger.warning("handle_picks_callback invocado sin callback_query")
         return
 
     await query.answer()
     user = update.effective_user
     state = USER_STATE.get(user.id)
     data = query.data
+    logger.info("picks callback recibido user_id=%s data=%s state_step=%s", user.id if user else None, data, (state or {}).get("step"))
 
     if data == "picks_today":
         date_str = arg_to_date("hoy")
