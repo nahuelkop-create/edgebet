@@ -2,6 +2,8 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+
 from db.connection import get_session
 from db.models import Fixture, Team
 from services.football_data import _get
@@ -38,10 +40,18 @@ def _upsert_team(session, team: dict[str, Any], league_name: str) -> None:
     team_id = team.get("id")
     if team_id is None:
         return
-    record = session.get(Team, int(team_id)) or Team(id=int(team_id))
-    record.name = team.get("name") or "Unknown"
-    record.league = league_name
-    session.merge(record)
+    stmt = pg_insert(Team).values(
+        id=int(team_id),
+        name=team.get("name") or "Unknown",
+        league=league_name,
+    ).on_conflict_do_update(
+        index_elements=["id"],
+        set_={
+            "name": team.get("name") or "Unknown",
+            "league": league_name,
+        },
+    )
+    session.execute(stmt)
 
 
 def _upsert_fixture(session, raw: dict[str, Any], league_name: str) -> bool:
@@ -56,14 +66,27 @@ def _upsert_fixture(session, raw: dict[str, Any], league_name: str) -> bool:
     _upsert_team(session, home, league_name)
     _upsert_team(session, away, league_name)
 
-    record = session.get(Fixture, int(fixture_id)) or Fixture(id=int(fixture_id))
-    record.home_team = home.get("name") or "Local"
-    record.away_team = away.get("name") or "Visitante"
-    record.league = league_name
-    record.date = _parse_api_date(fixture.get("date"))
-    record.status = (fixture.get("status") or {}).get("short")
-    record.result = _score_text(raw)
-    session.merge(record)
+    values = {
+        "id": int(fixture_id),
+        "home_team": home.get("name") or "Local",
+        "away_team": away.get("name") or "Visitante",
+        "league": league_name,
+        "date": _parse_api_date(fixture.get("date")),
+        "status": (fixture.get("status") or {}).get("short"),
+        "result": _score_text(raw),
+    }
+    stmt = pg_insert(Fixture).values(**values).on_conflict_do_update(
+        index_elements=["id"],
+        set_={
+            "home_team": values["home_team"],
+            "away_team": values["away_team"],
+            "league": values["league"],
+            "date": values["date"],
+            "status": values["status"],
+            "result": values["result"],
+        },
+    )
+    session.execute(stmt)
     return True
 
 
