@@ -2,7 +2,7 @@ import base64
 import os
 import re
 import tempfile
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -275,27 +275,67 @@ def _today_str() -> str:
     return (datetime.utcnow() - timedelta(hours=3)).date().isoformat()
 
 
+def _arg_time_label(match: dict) -> str:
+    """Kickoff time in Argentina (UTC-3) as 'HH:MM', or '' when unavailable."""
+    utc = match.get("utcDate")
+    if not utc:
+        return ""
+    try:
+        dt = datetime.fromisoformat(str(utc).replace("Z", "+00:00"))
+    except ValueError:
+        return ""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone(timedelta(hours=-3))).strftime("%H:%M")
+
+
+def _bet_match_label(match: dict) -> str:
+    """Button label like 'Argentina vs Jordan - Mundial 2026 (23:00 hs ARG)'."""
+    home = match.get("homeTeam", {}).get("name", "Local")
+    away = match.get("awayTeam", {}).get("name", "Visitante")
+    competition = match.get("competition", {}).get("name", "")
+    label = f"{home} vs {away}"
+    if competition:
+        label += f" - {competition}"
+    arg_time = _arg_time_label(match)
+    if arg_time:
+        label += f" ({arg_time} hs ARG)"
+    return label
+
+
 def build_bet_match_buttons(fixtures: list) -> InlineKeyboardMarkup:
     buttons = []
     for i, m in enumerate(fixtures):
-        home = m.get("homeTeam", {}).get("name", "Local")
-        away = m.get("awayTeam", {}).get("name", "Visitante")
-        buttons.append([InlineKeyboardButton(f"{home} vs {away}", callback_data=f"bet_match_{i}")])
+        buttons.append([InlineKeyboardButton(_bet_match_label(m), callback_data=f"bet_match_{i}")])
     return InlineKeyboardMarkup(buttons)
 
 
 async def apuesta(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    date_str = _today_str()
-    fixtures = get_fixtures_by_date(date_str)
+    today_date = (datetime.utcnow() - timedelta(hours=3)).date()
+    today_str = today_date.isoformat()
+    tomorrow_str = (today_date + timedelta(days=1)).isoformat()
+
+    # Today + tomorrow: matches kicking off after 23h ARG fall on the next UTC
+    # day, so fetching both makes them available to bet on. Dedupe by fixture id.
+    fixtures = []
+    seen = set()
+    for date_str in (today_str, tomorrow_str):
+        for m in get_fixtures_by_date(date_str):
+            fid = m.get("id")
+            if fid in seen:
+                continue
+            seen.add(fid)
+            fixtures.append(m)
+
     if not fixtures:
         return await update.message.reply_text(
-            f"No hay partidos disponibles para hoy ({date_str})."
+            f"No hay partidos disponibles para hoy ni mañana ({today_str} / {tomorrow_str})."
         )
 
-    USER_STATE[user.id] = {"step": "apuesta_match", "fixtures": fixtures, "date": date_str}
+    USER_STATE[user.id] = {"step": "apuesta_match", "fixtures": fixtures, "date": today_str}
     return await update.message.reply_text(
-        f"📝 Nueva apuesta — partidos de hoy ({date_str}).\n¿A qué partido querés apostar?",
+        f"📝 Nueva apuesta — partidos de hoy y mañana.\n¿A qué partido querés apostar?",
         reply_markup=build_bet_match_buttons(fixtures),
     )
 
