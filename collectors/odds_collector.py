@@ -40,10 +40,13 @@ def _fetch_events(sport_key: str) -> list[dict[str, Any]]:
     params = {
         "apiKey": ODDS_API_KEY,
         "regions": "eu",
-        "markets": "h2h,totals,btts",
+        "markets": "h2h,totals,btts,totals_corners,corners",
         "oddsFormat": "decimal",
     }
     response = requests.get(f"{BASE_URL}/sports/{sport_key}/odds", params=params, timeout=25)
+    if response.status_code == 422:
+        params["markets"] = "h2h,totals,btts"
+        response = requests.get(f"{BASE_URL}/sports/{sport_key}/odds", params=params, timeout=25)
     if response.status_code == 422:
         params["markets"] = "h2h,totals"
         response = requests.get(f"{BASE_URL}/sports/{sport_key}/odds", params=params, timeout=25)
@@ -99,6 +102,26 @@ def _snapshot_for_market(fixture_id: int, event: dict[str, Any], bookmaker: str,
             fixture_id=fixture_id,
             bookmaker=bookmaker,
             market="totals_2_5",
+            over_odds=over,
+            under_odds=under,
+            timestamp=timestamp,
+        )
+
+    if market_key in ("totals_corners", "corners"):
+        over = under = None
+        for outcome in market.get("outcomes", []) or []:
+            if float(outcome.get("point") or 0) != 9.5:
+                continue
+            if _norm(outcome.get("name")) == "over":
+                over = _price(outcome.get("price"))
+            elif _norm(outcome.get("name")) == "under":
+                under = _price(outcome.get("price"))
+        if over is None and under is None:
+            return None
+        return OddsSnapshot(
+            fixture_id=fixture_id,
+            bookmaker=bookmaker,
+            market="corners_9_5",
             over_odds=over,
             under_odds=under,
             timestamp=timestamp,
