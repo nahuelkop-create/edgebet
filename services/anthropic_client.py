@@ -15,6 +15,7 @@ from services.football_data import (
     get_head_to_head,
     get_fixture_lineups,
 )
+from services.odds_service import get_match_odds
 
 load_dotenv()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").replace(" ", "").strip()
@@ -148,6 +149,31 @@ def format_lineups_context(lineups: dict) -> str:
         formation = team.get("formation") or "N/D"
         lines.append(f"- {team.get('team', 'Equipo')} ({formation}): " + "; ".join(starters))
     return "\n".join(lines) + "\n"
+
+
+def format_odds_context(odds: dict) -> str:
+    if not odds or odds.get("error"):
+        error = odds.get("error") if odds else "sin respuesta"
+        return f"Cuotas reales: no disponibles ({error}).\n"
+
+    def _fmt(entry):
+        if not entry:
+            return "N/D"
+        bookmaker = entry.get("bookmaker") or odds.get("bookmaker") or "book"
+        return f"@{entry.get('price')} ({bookmaker})"
+
+    h2h = odds.get("h2h", {}) or {}
+    totals = odds.get("totals", {}) or {}
+    btts = odds.get("btts", {}) or {}
+    return (
+        "Cuotas reales (The Odds API; usar estas cuotas, no inventar cuotas estimadas):\n"
+        f"- Resultado 1X2: {odds.get('home_team')} {_fmt(h2h.get('home'))} | "
+        f"Empate {_fmt(h2h.get('draw'))} | {odds.get('away_team')} {_fmt(h2h.get('away'))}\n"
+        f"- Goles 2.5: Over 2.5 {_fmt(totals.get('over_2_5'))} | "
+        f"Under 2.5 {_fmt(totals.get('under_2_5'))}\n"
+        f"- BTTS: Sí {_fmt(btts.get('yes'))} | No {_fmt(btts.get('no'))}\n"
+        "Probabilidad implícita: 1/cuota. Value Bet si probabilidad estimada > probabilidad implícita.\n"
+    )
 
 
 def _normalize_name(name) -> str:
@@ -313,6 +339,7 @@ def format_match_prompt(match: dict) -> str:
     referee_profile = get_referee_profile(fixture_id) if fixture_id else {}
     h2h = get_head_to_head(home_id, away_id) if home_id and away_id else {}
     lineups = get_fixture_lineups(fixture_id) if fixture_id else {}
+    odds = get_match_odds(home_name, away_name)
     
     # Player statistics: pre-match uses tournament leaders per team, live/finished
     # uses the real per-fixture player data. get_player_stats branches on status.
@@ -338,6 +365,7 @@ def format_match_prompt(match: dict) -> str:
     referee_text = format_referee_context(referee_profile)
     h2h_text = format_h2h_context(h2h)
     lineups_text = format_lineups_context(lineups)
+    odds_text = format_odds_context(odds)
 
     # Build real per-category player rankings (match + tournament data)
     player_stats_text = _format_player_rankings(
@@ -359,16 +387,19 @@ def format_match_prompt(match: dict) -> str:
         "- Más faltas cometidas: [Jugador] - X faltas\n"
         "- Más faltas recibidas: [Jugador] - X faltas\n"
         "- Arquero destacado: [Jugador] - X atajadas\n\n"
-        "🎯 PICKS DE PARTIDO: X de Y con valor\n"
-        "- 🟢/🟡/🟠 X% - [apuesta concreta] @ cuota estimada → [razón en 1 línea]\n"
-        "- 🟢/🟡/🟠 X% - [apuesta concreta] @ cuota estimada → [razón en 1 línea]\n"
-        "(Mostrá solo picks de partido que pasen el filtro.)\n\n"
+        "🛡️ PICK SEGURO:\n"
+        "- X% - [pick con mayor confianza >80%] @ cuota real → [razón en 1 línea]\n\n"
+        "💎 VALUE BET:\n"
+        "- X% - [pick con mayor edge] @ cuota real → implícita X%, edge +X pp → 💎 VALUE BET\n\n"
+        "🚀 SOÑADA:\n"
+        "- [Pick 1] + [Pick 2] + [Pick 3] @ cuota combinada X.XX → [razón en 1 línea]\n"
+        "(Si no hay 3 picks seguros con cuota real disponible, escribí una sola línea: - No hay combinada sin inventar cuotas.)\n\n"
         "👤 PICKS DE JUGADORES:\n"
         "(Si la alineación está confirmada, primero escribí: ✅ Alineación confirmada\n"
         " y luego, por cada jugador clave que NO esté en el 11: ⚠️ [Jugador] no juega - equipo suplente)\n"
-        "- X% - [Top rematador titular] +X remates @ cuota estimada → dato real: X remates\n"
-        "- X% - [Jugador titular con más faltas] +X faltas cometidas @ cuota estimada → dato real: X faltas\n"
-        "- X% - [Arquero titular] +X atajadas @ cuota estimada → dato real: X atajadas\n"
+        "- X% - [Top rematador titular] +X remates → dato real: X remates\n"
+        "- X% - [Jugador titular con más faltas] +X faltas cometidas → dato real: X faltas\n"
+        "- X% - [Arquero titular] +X atajadas → dato real: X atajadas\n"
         "  (Si el arquero titular NO tiene dato real concreto de atajadas, NO muestres esta línea: reemplazala por el siguiente titular con el mejor dato real concreto en otra categoría disponible -faltas recibidas, remates, etc.-. NUNCA muestres una línea de pick con N/D o sin número real.)\n"
         "(Si la alineación NO está confirmada, NO escribas ninguna línea de pick: poné solo\n"
         " ⚠️ Alineación no confirmada - picks de jugadores no disponibles)\n\n"
@@ -376,18 +407,20 @@ def format_match_prompt(match: dict) -> str:
         "REGLAS:\n"
         "- DATA CLAVE: completá cada línea con los números reales provistos abajo. Si un dato no está, poné 'N/D'.\n"
         "- Si el partido NO empezó (pre-partido), no hay datos del propio partido: en DATA CLAVE usá los LÍDERES POR EQUIPO provistos abajo (torneo o temporada de club según indique el dato). Para los PICKS DE JUGADORES seguí SIEMPRE la regla de ALINEACIÓN: solo si está confirmada y solo con líderes marcados ✅ TITULAR.\n"
+        "- CUOTAS: usá SOLO las cuotas reales del bloque CUOTAS REALES. Si una cuota real no está disponible para un mercado, no uses ese mercado para PICK SEGURO, VALUE BET ni SOÑADA.\n"
+        "- VALUE BET: calculá probabilidad implícita = 1/cuota. Si tu probabilidad estimada supera la implícita, marcá 💎 VALUE BET. Ejemplo: 65% estimado vs cuota 2.00 (50% implícita) = edge +15 pp.\n"
+        "- 🛡️ PICK SEGURO: elegí el pick con mayor confianza siempre que sea >80%; si ninguno supera 80%, escribí 'Sin pick seguro >80%'.\n"
+        "- 💎 VALUE BET: mostrá UNA sola línea, únicamente el pick con mayor diferencia positiva entre tu probabilidad estimada y la probabilidad implícita de la cuota. Mostrá implícita y edge en puntos porcentuales. No muestres picks descartados ni edges negativos.\n"
+        "- 🚀 SOÑADA: armá una combinada de 3 picks seguros usando cuotas reales disponibles. La cuota combinada es el producto de las 3 cuotas, redondeada a 2 decimales. Si faltan 3 cuotas reales o la tercera pierna sería inventada/contradictoria, NO armes combinada y escribí exactamente una línea: '- No hay combinada sin inventar cuotas'.\n"
+        "- En SOÑADA solo podés usar selecciones que aparezcan literalmente en CUOTAS REALES: local gana, empate, visitante gana, Over 2.5, Under 2.5 o BTTS si está disponible. Prohibido inventar 'empate no', doble oportunidad, handicaps, primer tiempo, corners u otros mercados.\n"
         "- Usa el perfil del arbitro: si es estricto, prioriza picks de tarjetas y faltas; si es permisivo, baja exposicion a tarjetas.\n"
         "- Usa el H2H: si muestra muchos goles, refuerza overs de goles; si muestra muchas faltas, refuerza faltas/tarjetas.\n"
         "- ALINEACIÓN (regla CRÍTICA): mirá ESTADO DE ALINEACIÓN en RANKINGS REALES DE JUGADORES y reflejá su estado en la línea 'Alineación' de DATA CLAVE.\n"
-        "- Si ESTADO DE ALINEACIÓN es ⚠️ NO CONFIRMADA: en 👤 PICKS DE JUGADORES escribí EXACTAMENTE y SOLO esta línea: ⚠️ Alineación no confirmada - picks de jugadores no disponibles. NO generes ningún pick de jugador individual. Igual generá los PICKS DE PARTIDO normalmente.\n"
+        "- Si ESTADO DE ALINEACIÓN es ⚠️ NO CONFIRMADA: en 👤 PICKS DE JUGADORES escribí EXACTAMENTE y SOLO esta línea: ⚠️ Alineación no confirmada - picks de jugadores no disponibles. NO generes ningún pick de jugador individual. Igual generá PICK SEGURO, VALUE BET y SOÑADA normalmente.\n"
         "- Si ESTADO DE ALINEACIÓN es ✅ CONFIRMADA: arrancá 👤 PICKS DE JUGADORES con la línea ✅ Alineación confirmada. Hacé picks SOLO de jugadores marcados ✅ TITULAR. PROHIBIDO piquear a cualquiera marcado ❌ NO ESTÁ EN EL 11 / suplente o que no figure en el ONCE TITULAR OFICIAL.\n"
         "- Si un jugador clave (goleador, figura) aparece como ❌ NO ESTÁ EN EL 11 o en JUGADORES CLAVE QUE NO ESTÁN EN EL 11, agregá debajo de ✅ Alineación confirmada la línea: ⚠️ [Jugador] no juega - equipo suplente.\n"
         "- Los PICKS DE JUGADORES deben ser sobre jugadores CONCRETOS de los rankings reales y TITULARES, con líneas (+X) realistas según su número real.\n"
-        "- PICKS DE PARTIDO: generá candidatos SOLO de estos mercados: goles Over/Under, resultado, corners y BTTS. Asignales confianza individual y FILTRÁ: solo muestres picks de partido con confianza >=65%.\n"
-        "- Si ningún pick de partido llega a 65%, en PICKS DE PARTIDO escribí exactamente: ⚠️ No hay picks de partido con valor para este partido hoy.\n"
-        "- Mostrá cuántos picks de partido pasaron el filtro con el texto exacto 'X de Y con valor'. X DEBE coincidir exactamente con la cantidad de picks de partido visibles debajo; Y es el total de candidatos de partido evaluados.\n"
-        "- Ordená los picks de partido mostrados de mayor a menor confianza individual.\n"
-        "- Emoji por confianza individual en PICKS DE PARTIDO: 🟢 80%+; 🟡 70-79%; 🟠 65-69%. No uses esos emojis en picks de jugadores.\n"
+        "- Picks de partido: evaluá SOLO mercados con cuota real disponible: resultado 1X2, Over/Under 2.5 goles y BTTS. No uses corners para estas 3 secciones salvo que exista cuota real en CUOTAS REALES.\n"
         "- PICKS DE JUGADORES (SOLO si la alineación está ✅ CONFIRMADA): mostrá hasta 3 picks, sin filtro de confianza, eligiendo SOLO entre jugadores ✅ TITULAR y SOLO cuando exista un dato real concreto (numérico) para ese jugador: el titular con más remates reales con pick de remates, el titular con más faltas cometidas reales con pick de faltas cometidas, y el arquero titular con más atajadas reales con pick de atajadas. Si el arquero titular NO tiene dato real de atajadas (N/D o sin datos), NO muestres pick de arquero: reemplazalo por el siguiente titular con el mejor dato real concreto en otra categoría todavía no usada (faltas recibidas, remates, etc.).\n"
         "- Para PICKS DE JUGADORES compará numéricamente los datos reales de los TITULARES de ambos equipos. Nunca elijas un jugador con menos remates/faltas/atajadas que otro TITULAR disponible en la misma categoría. Si hay empate, elegí cualquiera de los empatados con el valor máximo. Ignorá por completo a los no titulares aunque tengan mejores números.\n"
         "- Los picks de jugadores deben usar jugadores CONCRETOS y TITULARES de los rankings reales e incluir su dato real concreto provisto. PROHIBIDO mostrar 'N/D', 'sin dato' o un pick de jugador sin número real: si el dato de una categoría no está disponible, NO muestres ese pick y reemplazalo por el siguiente titular con el mejor dato real concreto en otra categoría disponible. Es preferible mostrar menos de 3 picks de jugadores antes que mostrar uno con N/D.\n"
@@ -404,6 +437,7 @@ def format_match_prompt(match: dict) -> str:
         f"Últimos 5: {away_history_text}\n\n"
         f"ARBITRO:\n{referee_text}\n"
         f"H2H ENTRE EQUIPOS:\n{h2h_text}\n"
+        f"CUOTAS REALES:\n{odds_text}\n"
         f"ALINEACIONES:\n{lineups_text}\n"
         f"Contexto de grupo:\n{group_context}"
         f"RANKINGS REALES DE JUGADORES:\n{player_stats_text}\n"
