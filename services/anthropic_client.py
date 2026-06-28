@@ -16,7 +16,6 @@ from services.football_data import (
     get_fixture_lineups,
 )
 from services.odds_service import get_match_odds
-from models.corners_model import predict as predict_corners
 
 load_dotenv()
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "").replace(" ", "").strip()
@@ -165,6 +164,7 @@ def format_odds_context(odds: dict) -> str:
 
     h2h = odds.get("h2h", {}) or {}
     totals = odds.get("totals", {}) or {}
+    corners = odds.get("corners", {}) or {}
     btts = odds.get("btts", {}) or {}
     return (
         "Cuotas reales (The Odds API; usar estas cuotas, no inventar cuotas estimadas):\n"
@@ -172,9 +172,49 @@ def format_odds_context(odds: dict) -> str:
         f"Empate {_fmt(h2h.get('draw'))} | {odds.get('away_team')} {_fmt(h2h.get('away'))}\n"
         f"- Goles 2.5: Over 2.5 {_fmt(totals.get('over_2_5'))} | "
         f"Under 2.5 {_fmt(totals.get('under_2_5'))}\n"
+        f"- Corners 9.5: Over 9.5 {_fmt(corners.get('over_9_5'))} | "
+        f"Under 9.5 {_fmt(corners.get('under_9_5'))}\n"
         f"- BTTS: Sí {_fmt(btts.get('yes'))} | No {_fmt(btts.get('no'))}\n"
         "Probabilidad implícita: 1/cuota. Value Bet si probabilidad estimada > probabilidad implícita.\n"
     )
+
+
+def _candidate_line(label: str, entry: dict, market: str) -> dict | None:
+    if not entry or entry.get("price") is None:
+        return None
+    try:
+        price = float(entry.get("price"))
+    except (TypeError, ValueError):
+        return None
+    return {"label": label, "price": price, "market": market}
+
+
+def build_sonada_candidates(odds: dict) -> list[dict]:
+    if not odds or odds.get("error"):
+        return []
+
+    h2h = odds.get("h2h", {}) or {}
+    totals = odds.get("totals", {}) or {}
+    corners = odds.get("corners", {}) or {}
+    candidates = [
+        _candidate_line(f"{odds.get('home_team')} gana", h2h.get("home"), "resultado"),
+        _candidate_line("Empate", h2h.get("draw"), "resultado"),
+        _candidate_line(f"{odds.get('away_team')} gana", h2h.get("away"), "resultado"),
+        _candidate_line("Over 2.5 goles", totals.get("over_2_5"), "goles"),
+        _candidate_line("Under 2.5 goles", totals.get("under_2_5"), "goles"),
+        _candidate_line("Corners Over 9.5", corners.get("over_9_5"), "corners"),
+        _candidate_line("Corners Under 9.5", corners.get("under_9_5"), "corners"),
+    ]
+    return [candidate for candidate in candidates if candidate]
+
+
+def format_sonada_candidates(candidates: list[dict]) -> str:
+    if not candidates:
+        return "No hay candidatos con cuota real para armar SOÑADA.\n"
+    lines = ["Candidatos con cuota real para SOÑADA (no inventar cuotas):"]
+    for candidate in candidates:
+        lines.append(f"- {candidate['label']} @{candidate['price']:.2f} | mercado={candidate['market']}")
+    return "\n".join(lines) + "\n"
 
 
 def format_corners_model_context(prediction: dict) -> str:
@@ -197,6 +237,19 @@ def format_corners_model_context(prediction: dict) -> str:
         f"cuota real @{prediction.get('real_odds_under') or 'N/D'} | edge {edge_under_text}\n"
         f"- Confianza modelo: {prediction.get('confidence')}% | Recomienda: {recommended}\n"
     )
+
+
+def predict_corners_safe(fixture_id) -> dict:
+    if not fixture_id:
+        return {}
+    try:
+        from models.corners_model import predict as predict_corners
+    except Exception as exc:
+        return {"available": False, "fixture_id": fixture_id, "error": f"modelo no cargado: {exc}"}
+    try:
+        return predict_corners(fixture_id)
+    except Exception as exc:
+        return {"available": False, "fixture_id": fixture_id, "error": str(exc)}
 
 
 def _normalize_name(name) -> str:
@@ -363,7 +416,7 @@ def format_match_prompt(match: dict) -> str:
     h2h = get_head_to_head(home_id, away_id) if home_id and away_id else {}
     lineups = get_fixture_lineups(fixture_id) if fixture_id else {}
     odds = get_match_odds(home_name, away_name)
-    corners_prediction = predict_corners(fixture_id) if fixture_id else {}
+    corners_prediction = predict_corners_safe(fixture_id)
     
     # Player statistics: pre-match uses tournament leaders per team, live/finished
     # uses the real per-fixture player data. get_player_stats branches on status.
@@ -391,6 +444,8 @@ def format_match_prompt(match: dict) -> str:
     lineups_text = format_lineups_context(lineups)
     odds_text = format_odds_context(odds)
     corners_model_text = format_corners_model_context(corners_prediction)
+    sonada_candidates = build_sonada_candidates(odds)
+    sonada_candidates_text = format_sonada_candidates(sonada_candidates)
 
     # Build real per-category player rankings (match + tournament data)
     player_stats_text = _format_player_rankings(
@@ -419,9 +474,12 @@ def format_match_prompt(match: dict) -> str:
         "🧠 PICK MODELO CORNERS:\n"
         "- [Over/Under 9.5 corners] - X% @ cuota real → edge +X pp → validado por modelo\n"
         "(Si el modelo no recomienda o no hay cuota real/edge positivo, escribí exactamente: - Sin pick de corners validado por modelo.)\n\n"
-        "🚀 SOÑADA:\n"
-        "- [Pick 1] + [Pick 2] + [Pick 3] @ cuota combinada X.XX → [razón en 1 línea]\n"
-        "(Si no hay 3 picks seguros con cuota real disponible, escribí una sola línea: - No hay combinada sin inventar cuotas.)\n\n"
+        "🚀 SOÑADA: cuota combinada X.XX\n"
+        "- [Pick 1] @ cuota real\n"
+        "- [Pick 2] @ cuota real\n"
+        "- [Pick 3] @ cuota real (solo si existe un tercer pick con cuota real)\n"
+        "- COMBINADA TOTAL @ X.XX\n"
+        "(Si solo hay 2 picks con cuota real, hacé combinada de 2. Si solo hay 1, escribí: - No hay soñada: solo 1 pick con cuota real.)\n\n"
         "👤 PICKS DE JUGADORES:\n"
         "(Si la alineación está confirmada, primero escribí: ✅ Alineación confirmada\n"
         " y luego, por cada jugador clave que NO esté en el 11: ⚠️ [Jugador] no juega - equipo suplente)\n"
@@ -440,8 +498,8 @@ def format_match_prompt(match: dict) -> str:
         "- 🛡️ PICK SEGURO: elegí el pick con mayor confianza siempre que sea >80%; si ninguno supera 80%, escribí 'Sin pick seguro >80%'.\n"
         "- 💎 VALUE BET: mostrá UNA sola línea, únicamente el pick con mayor diferencia positiva entre tu probabilidad estimada y la probabilidad implícita de la cuota. Mostrá implícita y edge en puntos porcentuales. No muestres picks descartados ni edges negativos.\n"
         "- PICK MODELO CORNERS: usá SOLO el bloque MODELO CORNERS. Si 'Recomienda: Sí', mostrá Over 9.5 o Under 9.5 según el mayor edge positivo con cuota real disponible. Si 'Recomienda: No', si falta cuota real o el edge no es positivo, escribí exactamente '- Sin pick de corners validado por modelo.'.\n"
-        "- 🚀 SOÑADA: armá una combinada de 3 picks seguros usando cuotas reales disponibles. La cuota combinada es el producto de las 3 cuotas, redondeada a 2 decimales. Si faltan 3 cuotas reales o la tercera pierna sería inventada/contradictoria, NO armes combinada y escribí exactamente una línea: '- No hay combinada sin inventar cuotas'.\n"
-        "- En SOÑADA solo podés usar selecciones que aparezcan literalmente en CUOTAS REALES: local gana, empate, visitante gana, Over 2.5, Under 2.5 o BTTS si está disponible. Prohibido inventar 'empate no', doble oportunidad, handicaps, primer tiempo, corners u otros mercados.\n"
+        "- 🚀 SOÑADA: usá SOLO selecciones del bloque CANDIDATOS SOÑADA. Elegí los 3 picks con mayor confianza que tengan cuota real; si solo hay 2 picks con cuota real, armá combinada de 2; si solo hay 1, no muestres soñada. Multiplicá las cuotas y redondeá la combinada a 2 decimales.\n"
+        "- En SOÑADA no combines picks opuestos del mismo mercado (ej: local gana + empate, Over 2.5 + Under 2.5, Corners Over + Corners Under). Nunca inventes cuotas ni mercados. Corners está permitido en SOÑADA SOLO si aparece en CANDIDATOS SOÑADA con cuota real.\n"
         "- Usa el perfil del arbitro: si es estricto, prioriza picks de tarjetas y faltas; si es permisivo, baja exposicion a tarjetas.\n"
         "- Usa el H2H: si muestra muchos goles, refuerza overs de goles; si muestra muchas faltas, refuerza faltas/tarjetas.\n"
         "- ALINEACIÓN (regla CRÍTICA): mirá ESTADO DE ALINEACIÓN en RANKINGS REALES DE JUGADORES y reflejá su estado en la línea 'Alineación' de DATA CLAVE.\n"
@@ -468,6 +526,7 @@ def format_match_prompt(match: dict) -> str:
         f"ARBITRO:\n{referee_text}\n"
         f"H2H ENTRE EQUIPOS:\n{h2h_text}\n"
         f"CUOTAS REALES:\n{odds_text}\n"
+        f"CANDIDATOS SOÑADA:\n{sonada_candidates_text}\n"
         f"MODELO CORNERS:\n{corners_model_text}\n"
         f"ALINEACIONES:\n{lineups_text}\n"
         f"Contexto de grupo:\n{group_context}"

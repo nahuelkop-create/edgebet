@@ -57,6 +57,7 @@ def _empty_odds(home_team: str, away_team: str, error: str = None) -> Dict[str, 
         "bookmaker": None,
         "h2h": {},
         "totals": {},
+        "corners": {},
         "btts": {},
         "error": error,
     }
@@ -112,6 +113,12 @@ def _extract_best_available(event: Dict[str, Any], home_team: str, away_team: st
                     elif norm_name == "under":
                         _set_best(result["totals"], "under_2_5", price, bookmaker, "Under 2.5 goles")
 
+                elif market_key in ("totals_corners", "corners") and float(point or 0) == 9.5:
+                    if norm_name == "over":
+                        _set_best(result["corners"], "over_9_5", price, bookmaker, "Corners Over 9.5")
+                    elif norm_name == "under":
+                        _set_best(result["corners"], "under_9_5", price, bookmaker, "Corners Under 9.5")
+
                 elif market_key == "btts":
                     if norm_name in ("yes", "si", "sí"):
                         _set_best(result["btts"], "yes", price, bookmaker, "BTTS Sí")
@@ -123,6 +130,10 @@ def _extract_best_available(event: Dict[str, Any], home_team: str, away_team: st
 
 def _fetch_events(sport_key: str, params: Dict[str, Any]):
     response = requests.get(f"{BASE_URL}/sports/{sport_key}/odds", params=params, timeout=20)
+    if response.status_code == 422 and "corners" in str(params.get("markets", "")):
+        fallback = dict(params)
+        fallback["markets"] = "h2h,totals,btts"
+        response = requests.get(f"{BASE_URL}/sports/{sport_key}/odds", params=fallback, timeout=20)
     if response.status_code == 422 and "btts" in str(params.get("markets", "")):
         fallback = dict(params)
         fallback["markets"] = "h2h,totals"
@@ -132,14 +143,14 @@ def _fetch_events(sport_key: str, params: Dict[str, Any]):
 
 
 def get_match_odds(home_team: str, away_team: str) -> Dict[str, Any]:
-    """Return bet365 odds, or best available odds, for 1X2, O/U 2.5 and BTTS."""
+    """Return bet365 odds, or best available odds, for 1X2, goals, corners and BTTS."""
     if not ODDS_API_KEY:
         return _empty_odds(home_team, away_team, "ODDS_API_KEY no definido")
 
     params = {
         "apiKey": ODDS_API_KEY,
         "regions": "eu",
-        "markets": "h2h,totals,btts",
+        "markets": "h2h,totals,btts,totals_corners,corners",
         "oddsFormat": "decimal",
     }
     last_error = None
