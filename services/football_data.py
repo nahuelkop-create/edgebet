@@ -129,6 +129,7 @@ def _prematch_player_stats(
         tid = team.get("id")
         tname = team.get("name", "Unknown")
         profile = {
+            "top_shooter": None,
             "top_scorer": _team_leader(scorers, tid),
             "top_assist": _team_leader(assists, tid),
             "top_fouls": _team_leader(fouls, tid),
@@ -139,6 +140,8 @@ def _prematch_player_stats(
         # so many squads are absent. Fill any gaps with this team's own leaders.
         if tid is not None and any(v is None for v in profile.values()):
             squad = get_team_player_leaders(tid, league_id, season)
+            for k in ("top_shooter", "top_fouls", "top_fouls_drawn"):
+                profile[k] = squad.get(k)
             for k in profile:
                 if profile[k] is None:
                     profile[k] = squad.get(k)
@@ -325,9 +328,106 @@ def _top_player(players: List[Dict[str, Any]], value_getter) -> Optional[Dict[st
         val = value_getter(p) or 0
         if val > best_val:
             best_val = val
-            best = {"name": p.get("name"), "team": p.get("team"),
-                    "team_id": p.get("team_id"), "value": int(val)}
+            best = {
+                "name": p.get("name"),
+                "team": p.get("team"),
+                "team_id": p.get("team_id"),
+                "value": int(val),
+                "source": p.get("source", "torneo"),
+                "source_team": p.get("source_team"),
+            }
+            if "shots_on_target" in p:
+                best["shots_on_target"] = int(p.get("shots_on_target") or 0)
     return best
+
+
+def _int_stat(value: Any) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _player_record_from_stat(
+    item: Dict[str, Any],
+    stat: Dict[str, Any],
+    national_team_id: int,
+    source: str,
+) -> Dict[str, Any]:
+    player = item.get("player", {}) or {}
+    team = stat.get("team", {}) or {}
+    games = stat.get("games", {}) or {}
+    goals = stat.get("goals", {}) or {}
+    shots = stat.get("shots", {}) or {}
+    fouls = stat.get("fouls", {}) or {}
+    cards = stat.get("cards", {}) or {}
+    return {
+        "player_id": player.get("id"),
+        "name": player.get("name", "Unknown"),
+        "team": team.get("name", "Unknown"),
+        "team_id": national_team_id,
+        "source": source,
+        "source_team": team.get("name"),
+        "appearances": _int_stat(games.get("appearences")),
+        "goals": _int_stat(goals.get("total")),
+        "assists": _int_stat(goals.get("assists")),
+        "saves": _int_stat(goals.get("saves")),
+        "shots": _int_stat(shots.get("total")),
+        "shots_on_target": _int_stat(shots.get("on")),
+        "fouls": _int_stat(fouls.get("committed")),
+        "fouls_drawn": _int_stat(fouls.get("drawn")),
+        "yellow": _int_stat(cards.get("yellow")),
+    }
+
+
+def _club_season_player_record(
+    player_id: int,
+    national_team_id: int,
+    club_season: int = 2025,
+) -> Optional[Dict[str, Any]]:
+    try:
+        data = _get("/players", params={"id": player_id, "season": club_season})
+    except Exception:
+        return None
+
+    aggregate: Optional[Dict[str, Any]] = None
+    top_team = None
+    top_team_apps = -1
+
+    for item in data.get("response", []):
+        for stat in item.get("statistics", []) or []:
+            record = _player_record_from_stat(
+                item, stat, national_team_id, source="temporada de club"
+            )
+            if aggregate is None:
+                aggregate = record
+                for key in ("team", "source_team"):
+                    aggregate[key] = record.get(key)
+            else:
+                for key in (
+                    "appearances",
+                    "goals",
+                    "assists",
+                    "saves",
+                    "shots",
+                    "shots_on_target",
+                    "fouls",
+                    "fouls_drawn",
+                    "yellow",
+                ):
+                    aggregate[key] += record.get(key, 0)
+
+            apps = record.get("appearances", 0)
+            if apps > top_team_apps:
+                top_team_apps = apps
+                top_team = record.get("source_team")
+
+    if not aggregate or aggregate.get("appearances", 0) <= 0:
+        return None
+
+    aggregate["team"] = top_team or aggregate.get("team")
+    aggregate["source_team"] = top_team or aggregate.get("source_team")
+    return aggregate
 
 
 def get_team_player_leaders(
@@ -336,10 +436,8 @@ def get_team_player_leaders(
     season: int = 2026,
     max_pages: int = 5,
 ) -> Dict[str, Any]:
-    """A single team's tournament leaders (top scorer / assistant / fouls
-    committed / fouls drawn / cards / saves), aggregated from /players. Unlike
-    the global /players/top* lists, this covers every squad, not just the
-    tournament-wide top 20.
+    """A single team's leaders, preferring the tournament but falling back to a
+    player's 2025 club season when the World Cup sample is too small.
     """
     players: List[Dict[str, Any]] = []
     try:
@@ -353,26 +451,18 @@ def get_team_player_leaders(
             total_pages = data.get("paging", {}).get("total", 1) or 1
             for item in data.get("response", []):
                 stat = (item.get("statistics") or [{}])[0]
-                team = stat.get("team", {})
-                goals = stat.get("goals", {}) or {}
-                fouls = stat.get("fouls", {}) or {}
-                cards = stat.get("cards", {}) or {}
-                players.append({
-                    "name": item.get("player", {}).get("name", "Unknown"),
-                    "team": team.get("name", "Unknown"),
-                    "team_id": team.get("id", team_id),
-                    "goals": int(goals.get("total") or 0),
-                    "assists": int(goals.get("assists") or 0),
-                    "saves": int(goals.get("saves") or 0),
-                    "fouls": int(fouls.get("committed") or 0),
-                    "fouls_drawn": int(fouls.get("drawn") or 0),
-                    "yellow": int(cards.get("yellow") or 0),
-                })
+                record = _player_record_from_stat(item, stat, team_id, source="torneo")
+                if record.get("appearances", 0) < 2 and record.get("player_id"):
+                    club_record = _club_season_player_record(record["player_id"], team_id)
+                    if club_record:
+                        record = club_record
+                players.append(record)
             page += 1
     except Exception:
         pass
 
     return {
+        "top_shooter": _top_player(players, lambda p: p.get("shots")),
         "top_scorer": _top_player(players, lambda p: p.get("goals")),
         "top_assist": _top_player(players, lambda p: p.get("assists")),
         "top_fouls": _top_player(players, lambda p: p.get("fouls")),

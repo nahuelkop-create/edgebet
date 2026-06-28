@@ -375,7 +375,7 @@ def format_match_prompt(match: dict) -> str:
         "💰 Confianza global: X%\n\n"
         "REGLAS:\n"
         "- DATA CLAVE: completá cada línea con los números reales provistos abajo. Si un dato no está, poné 'N/D'.\n"
-        "- Si el partido NO empezó (pre-partido), no hay datos del propio partido: en DATA CLAVE usá los LÍDERES DEL TORNEO de cada equipo (goleador, asistidor, faltas, tarjetas). Para los PICKS DE JUGADORES seguí SIEMPRE la regla de ALINEACIÓN: solo si está confirmada y solo con líderes marcados ✅ TITULAR.\n"
+        "- Si el partido NO empezó (pre-partido), no hay datos del propio partido: en DATA CLAVE usá los LÍDERES POR EQUIPO provistos abajo (torneo o temporada de club según indique el dato). Para los PICKS DE JUGADORES seguí SIEMPRE la regla de ALINEACIÓN: solo si está confirmada y solo con líderes marcados ✅ TITULAR.\n"
         "- Usa el perfil del arbitro: si es estricto, prioriza picks de tarjetas y faltas; si es permisivo, baja exposicion a tarjetas.\n"
         "- Usa el H2H: si muestra muchos goles, refuerza overs de goles; si muestra muchas faltas, refuerza faltas/tarjetas.\n"
         "- ALINEACIÓN (regla CRÍTICA): mirá ESTADO DE ALINEACIÓN en RANKINGS REALES DE JUGADORES y reflejá su estado en la línea 'Alineación' de DATA CLAVE.\n"
@@ -453,7 +453,7 @@ def _flatten_players(teams: dict) -> list:
 
 
 def _format_prematch_profiles(profiles: dict, xi_tokens: set, confirmed: bool) -> str:
-    """Pre-match player block: tournament leaders for each team (top scorer,
+    """Pre-match player block: leaders for each team (top shooter, top scorer,
     top assistant, most fouls committed, most fouls drawn, most yellow cards).
     Each leader is tagged with whether they start, and absent key players are
     flagged when the XI is confirmed so the model never picks a benched star."""
@@ -462,20 +462,33 @@ def _format_prematch_profiles(profiles: dict, xi_tokens: set, confirmed: bool) -
         if confirmed
         else " (alineación NO confirmada: no usar para picks de jugadores)"
     )
-    lines = [f"📋 LÍDERES DEL TORNEO POR EQUIPO{note}:"]
+    lines = [f"📋 LÍDERES POR EQUIPO{note}:"]
     if not profiles:
-        lines.append("  Sin datos de líderes del torneo disponibles.")
+        lines.append("  Sin datos de líderes disponibles.")
         return "\n".join(lines)
 
     def _fmt(entry, unit):
         if not entry or not entry.get("name"):
             return "N/D"
         tag = _xi_tag(entry.get("name"), xi_tokens, confirmed)
-        return f"{entry['name']} ({entry.get('value', 0)} {unit}){tag}"
+        source = entry.get("source") or "torneo"
+        return f"{entry['name']} ({entry.get('value', 0)} {unit}) ({source}){tag}"
+
+    def _fmt_shooter(entry):
+        if not entry or not entry.get("name"):
+            return "N/D"
+        tag = _xi_tag(entry.get("name"), xi_tokens, confirmed)
+        source = entry.get("source") or "torneo"
+        on_target = entry.get("shots_on_target", 0)
+        return (
+            f"{entry['name']} ({entry.get('value', 0)} remates, "
+            f"{on_target} al arco) ({source}){tag}"
+        )
 
     absent_keys = []  # key attacking players (scorer/assist) on the bench
     for team, prof in profiles.items():
         lines.append(f"\n🎯 {team}:")
+        lines.append(f"  - Top rematador: {_fmt_shooter(prof.get('top_shooter'))}")
         lines.append(f"  - Top goleador: {_fmt(prof.get('top_scorer'), 'goles')}")
         lines.append(f"  - Top asistidor: {_fmt(prof.get('top_assist'), 'asist.')}")
         lines.append(f"  - Más faltas cometidas: {_fmt(prof.get('top_fouls'), 'faltas')}")
