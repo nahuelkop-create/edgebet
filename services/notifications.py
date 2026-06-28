@@ -1,6 +1,6 @@
 """Automatic Telegram notifications, driven by a threading-based scheduler.
 
-Two background daemon threads (started from run_bot.py via start_schedulers()):
+Background daemon threads (started from run_bot.py via start_schedulers()):
 
 1. Pre-match (every 30 min): for each of today's fixtures kicking off within the
    next two hours, send the full Claude analysis to every user once (deduped in
@@ -9,6 +9,8 @@ Two background daemon threads (started from run_bot.py via start_schedulers()):
    grade every pick from the real API result/stats, send a detailed settlement
    message and update the balance. Bets without fixture_id are matched by name
    against fixtures from the bet date.
+3. Data collectors: upcoming fixtures, finished match stats and odds snapshots
+   are persisted into PostgreSQL when DATABASE_URL is configured.
 
 Messages are sent with a plain HTTP call to the Telegram Bot API so the threads
 stay completely independent of python-telegram-bot's asyncio event loop.
@@ -24,6 +26,9 @@ from datetime import datetime, timedelta, timezone
 import requests
 from dotenv import load_dotenv
 
+from collectors.fixtures_collector import collect_upcoming_fixtures
+from collectors.odds_collector import collect_odds
+from collectors.stats_collector import collect_finished_match_stats
 from services.anthropic_client import analyze_match
 from services.football_data import (
     _get,
@@ -50,6 +55,9 @@ FINISHED_STATUSES = {"FT", "AET", "PEN"}
 PRE_MATCH_WINDOW_SECONDS = 2 * 60 * 60  # notify when kickoff is <= 2h away
 PRE_MATCH_INTERVAL = 30 * 60            # scheduler: pre-match check every 30 min
 RESULTS_INTERVAL = 15 * 60             # scheduler: results check every 15 min
+FIXTURES_COLLECTOR_INTERVAL = 60 * 60   # scheduler: upcoming fixtures every 60 min
+STATS_COLLECTOR_INTERVAL = 15 * 60      # scheduler: finished match stats every 15 min
+ODDS_COLLECTOR_INTERVAL = 30 * 60       # scheduler: odds snapshots every 30 min
 
 
 # --------------------------------------------------------------------------- #
@@ -624,7 +632,7 @@ def _run_loop(job, interval: int, first_delay: int, label: str):
 
 
 def start_schedulers():
-    """Launch the two notification loops in daemon threads."""
+    """Launch notification and collector loops in daemon threads."""
     threading.Thread(
         target=_run_loop,
         args=(check_prematch_notifications, PRE_MATCH_INTERVAL, 30, "pre-partido"),
@@ -635,7 +643,29 @@ def start_schedulers():
         args=(check_result_notifications, RESULTS_INTERVAL, 60, "resultados"),
         daemon=True,
     ).start()
+    threading.Thread(
+        target=_run_loop,
+        args=(collect_upcoming_fixtures, FIXTURES_COLLECTOR_INTERVAL, 10, "collector-fixtures"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_run_loop,
+        args=(collect_finished_match_stats, STATS_COLLECTOR_INTERVAL, 90, "collector-stats"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_run_loop,
+        args=(collect_odds, ODDS_COLLECTOR_INTERVAL, 120, "collector-odds"),
+        daemon=True,
+    ).start()
     logging.info(
-        "Schedulers de notificaciones iniciados (pre-partido cada %smin, resultados cada %smin).",
-        PRE_MATCH_INTERVAL // 60, RESULTS_INTERVAL // 60,
+        (
+            "Schedulers iniciados: pre-partido cada %smin, resultados cada %smin, "
+            "fixtures cada %smin, stats cada %smin, odds cada %smin."
+        ),
+        PRE_MATCH_INTERVAL // 60,
+        RESULTS_INTERVAL // 60,
+        FIXTURES_COLLECTOR_INTERVAL // 60,
+        STATS_COLLECTOR_INTERVAL // 60,
+        ODDS_COLLECTOR_INTERVAL // 60,
     )

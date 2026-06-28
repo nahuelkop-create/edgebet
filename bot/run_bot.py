@@ -70,10 +70,9 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Automatic notifications run in their own daemon threads (threading-based
-    # scheduler): pre-match analysis every 30 min + bet results every 15 min.
+    # Automatic notifications and platform collectors run in daemon threads.
     start_schedulers()
-    print("Schedulers de notificaciones iniciados (threading): pre-partido 30min, resultados 15min.")
+    print("Schedulers iniciados (threading): notificaciones + collectors en background.")
 
     print("Bot de Telegram iniciado. Presiona Ctrl+C para detener.")
     try:
