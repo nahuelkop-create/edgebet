@@ -454,9 +454,9 @@ def _flatten_players(teams: dict) -> list:
 
 def _format_prematch_profiles(profiles: dict, xi_tokens: set, confirmed: bool) -> str:
     """Pre-match player block: tournament leaders for each team (top scorer,
-    top assistant, most fouls committed, most yellow cards). Each leader is tagged
-    with whether they start, and absent key players are flagged when the XI is
-    confirmed so the model never picks a benched star."""
+    top assistant, most fouls committed, most fouls drawn, most yellow cards).
+    Each leader is tagged with whether they start, and absent key players are
+    flagged when the XI is confirmed so the model never picks a benched star."""
     note = (
         " (usar SOLO los marcados ✅ TITULAR)"
         if confirmed
@@ -479,6 +479,7 @@ def _format_prematch_profiles(profiles: dict, xi_tokens: set, confirmed: bool) -
         lines.append(f"  - Top goleador: {_fmt(prof.get('top_scorer'), 'goles')}")
         lines.append(f"  - Top asistidor: {_fmt(prof.get('top_assist'), 'asist.')}")
         lines.append(f"  - Más faltas cometidas: {_fmt(prof.get('top_fouls'), 'faltas')}")
+        lines.append(f"  - Más faltas recibidas: {_fmt(prof.get('top_fouls_drawn'), 'faltas')}")
         lines.append(f"  - Más tarjetas: {_fmt(prof.get('top_cards'), 'amarillas')}")
         if prof.get("top_keeper"):
             lines.append(f"  - Arquero (más atajadas): {_fmt(prof.get('top_keeper'), 'atajadas')}")

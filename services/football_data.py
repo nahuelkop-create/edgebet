@@ -114,7 +114,7 @@ def _prematch_player_stats(
     season: int = 2026,
 ) -> Dict[str, Any]:
     """Pre-match player profile: per team show the tournament leaders (top
-    scorer, top assistant, most fouls committed, most yellow cards).
+    scorer, top assistant, most fouls committed, most fouls drawn, most yellow cards).
 
     `teams` is a list of {"id", "name"} dicts (home first, away second).
     """
@@ -132,6 +132,7 @@ def _prematch_player_stats(
             "top_scorer": _team_leader(scorers, tid),
             "top_assist": _team_leader(assists, tid),
             "top_fouls": _team_leader(fouls, tid),
+            "top_fouls_drawn": None,
             "top_cards": _team_leader(yellow, tid),
         }
         # The global /players/top* lists only cover the tournament-wide top ~20,
@@ -335,9 +336,10 @@ def get_team_player_leaders(
     season: int = 2026,
     max_pages: int = 5,
 ) -> Dict[str, Any]:
-    """A single team's tournament leaders (top scorer / assistant / fouls / cards
-    / saves), aggregated from /players. Unlike the global /players/top* lists,
-    this covers every squad, not just the tournament-wide top 20.
+    """A single team's tournament leaders (top scorer / assistant / fouls
+    committed / fouls drawn / cards / saves), aggregated from /players. Unlike
+    the global /players/top* lists, this covers every squad, not just the
+    tournament-wide top 20.
     """
     players: List[Dict[str, Any]] = []
     try:
@@ -363,6 +365,7 @@ def get_team_player_leaders(
                     "assists": int(goals.get("assists") or 0),
                     "saves": int(goals.get("saves") or 0),
                     "fouls": int(fouls.get("committed") or 0),
+                    "fouls_drawn": int(fouls.get("drawn") or 0),
                     "yellow": int(cards.get("yellow") or 0),
                 })
             page += 1
@@ -373,6 +376,7 @@ def get_team_player_leaders(
         "top_scorer": _top_player(players, lambda p: p.get("goals")),
         "top_assist": _top_player(players, lambda p: p.get("assists")),
         "top_fouls": _top_player(players, lambda p: p.get("fouls")),
+        "top_fouls_drawn": _top_player(players, lambda p: p.get("fouls_drawn")),
         "top_cards": _top_player(players, lambda p: p.get("yellow")),
         "top_keeper": _top_player(players, lambda p: p.get("saves")),
     }
