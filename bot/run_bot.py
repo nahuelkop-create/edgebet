@@ -26,6 +26,7 @@ from bot.handlers import (
 from services.database import initialize_db
 from services.notifications import start_schedulers
 from web.app import app as web_app
+from db.migrations import initialize_postgres
 
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
@@ -46,6 +47,10 @@ def main():
         raise RuntimeError("TELEGRAM_TOKEN no está definido en el entorno")
 
     initialize_db()
+    try:
+        initialize_postgres()
+    except Exception:
+        logging.exception("No se pudo inicializar PostgreSQL; el bot sigue usando SQLite.")
 
     # Start the dashboard web server in a daemon thread while the Telegram bot
     # polls in the main thread.
