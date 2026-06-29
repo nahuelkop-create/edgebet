@@ -77,31 +77,37 @@ def _format_fixture(fixture: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _get_cached_fixtures(date_str: str) -> Optional[List[Dict[str, Any]]]:
-    cached = _fixtures_by_date_cache.get(date_str)
+def _fixtures_cache_key(date_str: str, league_id: int) -> str:
+    return f"{date_str}:{league_id}"
+
+
+def _get_cached_fixtures(date_str: str, league_id: int) -> Optional[List[Dict[str, Any]]]:
+    cache_key = _fixtures_cache_key(date_str, league_id)
+    cached = _fixtures_by_date_cache.get(cache_key)
     if not cached:
         return None
 
     cached_at, fixtures = cached
     if time.monotonic() - cached_at >= FIXTURES_CACHE_TTL_SECONDS:
-        _fixtures_by_date_cache.pop(date_str, None)
+        _fixtures_by_date_cache.pop(cache_key, None)
         return None
 
-    logger.info("Using cached fixtures for date=%s count=%s", date_str, len(fixtures))
+    logger.info("Using cached fixtures for date=%s league=%s count=%s", date_str, league_id, len(fixtures))
     return [dict(fixture) for fixture in fixtures]
 
 
-def _cache_fixtures(date_str: str, fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    _fixtures_by_date_cache[date_str] = (time.monotonic(), [dict(fixture) for fixture in fixtures])
+def _cache_fixtures(date_str: str, league_id: int, fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    cache_key = _fixtures_cache_key(date_str, league_id)
+    _fixtures_by_date_cache[cache_key] = (time.monotonic(), [dict(fixture) for fixture in fixtures])
     return fixtures
 
 
-def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_fixtures_by_date(date_str: Optional[str] = None, league_id: int = WORLD_CUP_LEAGUE_ID) -> List[Dict[str, Any]]:
     """Get fixtures for a specific date"""
     if date_str is None:
         date_str = (datetime.utcnow() - timedelta(hours=3)).date().isoformat()
 
-    cached = _get_cached_fixtures(date_str)
+    cached = _get_cached_fixtures(date_str, league_id)
     if cached is not None:
         return cached
 
@@ -111,7 +117,7 @@ def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]
             "date",
             {
                 "date": date_str,
-                "league": WORLD_CUP_LEAGUE_ID,
+                "league": league_id,
                 "season": 2026,
             },
             None,
@@ -119,7 +125,7 @@ def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]
         (
             "season",
             {
-                "league": WORLD_CUP_LEAGUE_ID,
+                "league": league_id,
                 "season": 2026,
             },
             date_str,
@@ -128,7 +134,7 @@ def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]
             "date_status_ns",
             {
                 "date": date_str,
-                "league": WORLD_CUP_LEAGUE_ID,
+                "league": league_id,
                 "season": 2026,
                 "status": "NS",
             },
@@ -161,9 +167,9 @@ def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]
                 logger.exception("Could not parse fixture payload: %s", fixture)
 
         if fixtures:
-            return _cache_fixtures(date_str, fixtures)
+            return _cache_fixtures(date_str, league_id, fixtures)
 
-    return _cache_fixtures(date_str, fixtures)
+    return _cache_fixtures(date_str, league_id, fixtures)
 
 
 def get_fixtures_today() -> List[Dict[str, Any]]:

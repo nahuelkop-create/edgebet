@@ -17,7 +17,7 @@ from bot.handlers import (
     handle_bet_callback,
     handle_message,
     handle_photo,
-    handle_picks_callback,
+    handle_picks_callback_v2,
     newbet,
     picks,
     resultado,
@@ -75,7 +75,7 @@ def main():
     app.add_handler(CommandHandler("newbet", newbet))
     app.add_handler(CommandHandler("picks", picks))
     app.add_handler(CommandHandler("balance", balance))
-    app.add_handler(CallbackQueryHandler(handle_picks_callback, pattern="^(?:picks_|match_|prematch_|live_)"))
+    app.add_handler(CallbackQueryHandler(handle_picks_callback_v2, pattern="^(?:picks_|league_|match_|prematch_|live_)"))
     app.add_handler(CallbackQueryHandler(handle_bet_callback, pattern="^(?:bet_match_|res_|resw_|resl_)"))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

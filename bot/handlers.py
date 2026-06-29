@@ -47,6 +47,17 @@ MARKETS = [
     "barridas",
 ]
 
+PICK_LEAGUES = [
+    {"key": "wc", "id": 1, "label": "🏆 Mundial 2026"},
+    {"key": "arg", "id": 128, "label": "🇦🇷 Torneo Argentino"},
+    {"key": "pl", "id": 39, "label": "🏴󠁧󠁢󠁥󠁮󠁧󠁿 Premier League"},
+    {"key": "laliga", "id": 140, "label": "🇪🇸 La Liga"},
+    {"key": "lib", "id": 13, "label": "🌍 Copa Libertadores"},
+    {"key": "bra", "id": 71, "label": "🇧🇷 Brasilerao"},
+]
+PICK_LEAGUE_BY_KEY = {league["key"]: league for league in PICK_LEAGUES}
+ALL_LEAGUES_KEY = "all"
+
 USER_STATE: Dict[int, Dict[str, Any]] = {}
 
 # Fixture statuses (API-Football short codes) that mean the match is being played
@@ -83,6 +94,22 @@ def build_picks_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(buttons)
 
 
+def build_league_buttons(date_str: str) -> InlineKeyboardMarkup:
+    buttons = [
+        [InlineKeyboardButton(league["label"], callback_data=f"league_{date_str}_{league['key']}")]
+        for league in PICK_LEAGUES
+    ]
+    buttons.append([InlineKeyboardButton("ðŸ“‹ Todos los partidos", callback_data=f"league_{date_str}_{ALL_LEAGUES_KEY}")])
+    buttons.append([InlineKeyboardButton("â†©ï¸ Volver", callback_data="picks_menu")])
+    return InlineKeyboardMarkup(buttons)
+
+
+def league_label(league_key: str) -> str:
+    if league_key == ALL_LEAGUES_KEY:
+        return "Todos los partidos"
+    return PICK_LEAGUE_BY_KEY.get(league_key, {}).get("label", "Liga")
+
+
 def format_fixtures_text(fixtures: list, date_str: str) -> str:
     fixtures_text = "\n".join(
         f"{i+1}. {m.get('homeTeam', {}).get('name')} vs {m.get('awayTeam', {}).get('name')} - {m.get('competition', {}).get('name')} ({m.get('status')})"
@@ -91,29 +118,54 @@ def format_fixtures_text(fixtures: list, date_str: str) -> str:
     return f"Partidos para {date_str}:\n{fixtures_text}\n\nToca el partido para generar los picks."
 
 
-def build_match_buttons(fixtures: list, date_str: str) -> InlineKeyboardMarkup:
+def build_match_buttons(fixtures: list, date_str: str, league_key: str) -> InlineKeyboardMarkup:
     buttons = []
     for match in fixtures:
         match_id = match.get("id")
         home = match.get("homeTeam", {}).get("name", "Local")
         away = match.get("awayTeam", {}).get("name", "Visitante")
-        callback_data = f"match_{date_str}_{match_id}"
+        callback_data = f"match_{date_str}_{league_key}_{match_id}"
         buttons.append([InlineKeyboardButton(f"{home} vs {away}", callback_data=callback_data)])
-    buttons.append([InlineKeyboardButton("↩️ Volver", callback_data="picks_menu")])
+    buttons.append([InlineKeyboardButton("↩️ Volver a ligas", callback_data=f"picks_leagues_{date_str}")])
     return InlineKeyboardMarkup(buttons)
 
 
-def get_fixtures_for_date(date_str: str) -> list:
-    return get_fixtures_by_date(date_str)
+def get_fixtures_for_date(date_str: str, league_key: str = ALL_LEAGUES_KEY) -> list:
+    if league_key == ALL_LEAGUES_KEY:
+        fixtures = []
+        seen_ids = set()
+        for league in PICK_LEAGUES:
+            for match in get_fixtures_by_date(date_str, league_id=league["id"]):
+                match_id = match.get("id")
+                if match_id in seen_ids:
+                    continue
+                seen_ids.add(match_id)
+                fixtures.append(match)
+        return sorted(fixtures, key=lambda m: m.get("utcDate") or "")
+
+    league = PICK_LEAGUE_BY_KEY.get(league_key)
+    if not league:
+        return []
+    return get_fixtures_by_date(date_str, league_id=league["id"])
 
 
-def build_match_action_buttons(date_str: str, match_id, is_live: bool) -> InlineKeyboardMarkup:
+def build_match_action_buttons(date_str: str, league_key: str, match_id, is_live: bool) -> InlineKeyboardMarkup:
     """Buttons shown after picking a match: always 'Picks pre-partido'; live
     matches additionally get the '🔴 En vivo' real-time stats button."""
     rows = [[InlineKeyboardButton("📊 Picks pre-partido", callback_data=f"prematch_{date_str}_{match_id}")]]
     if is_live:
         rows.append([InlineKeyboardButton("🔴 En vivo", callback_data=f"live_{date_str}_{match_id}")])
     rows.append([InlineKeyboardButton("↩️ Volver a partidos", callback_data="picks_menu")])
+    return InlineKeyboardMarkup(rows)
+
+
+def build_contextual_match_action_buttons(date_str: str, league_key: str, match_id, is_live: bool) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton("ðŸ“Š Picks pre-partido", callback_data=f"prematch_{date_str}_{league_key}_{match_id}")]
+    ]
+    if is_live:
+        rows.append([InlineKeyboardButton("ðŸ”´ En vivo", callback_data=f"live_{date_str}_{league_key}_{match_id}")])
+    rows.append([InlineKeyboardButton("â†©ï¸ Volver a partidos", callback_data=f"league_{date_str}_{league_key}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -130,13 +182,13 @@ def match_options_text(match: dict) -> str:
     return f"{head}\n{competition}\n\n{body}"
 
 
-def _resolve_match(state: Optional[dict], date_str: str, match_id) -> Optional[dict]:
+def _resolve_match(state: Optional[dict], date_str: str, league_key: str, match_id) -> Optional[dict]:
     """Find the selected match from the cached state, falling back to a re-fetch."""
     fixtures = None
-    if state and state.get("date") == date_str:
+    if state and state.get("date") == date_str and state.get("league_key") == league_key:
         fixtures = state.get("fixtures")
     if not fixtures:
-        fixtures = get_fixtures_for_date(date_str)
+        fixtures = get_fixtures_for_date(date_str, league_key)
     return next((m for m in (fixtures or []) if str(m.get("id")) == str(match_id)), None)
 
 
@@ -482,16 +534,11 @@ async def picks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text(
                 "Formato inválido. Usa /picks hoy, /picks mañana o /picks YYYY-MM-DD."
             )
-        fixtures = get_fixtures_for_date(date_str)
-        logger.info("/picks fixtures user_id=%s date=%s count=%s", user.id, date_str, len(fixtures))
-        if not fixtures:
-            return await update.message.reply_text(f"No hay partidos disponibles para {date_str}.")
-
-        USER_STATE[user.id] = {"step": "picks_select", "fixtures": fixtures, "date": date_str}
-        logger.debug("/picks estado actualizado user_id=%s step=picks_select", user.id)
+        USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
+        logger.debug("/picks estado actualizado user_id=%s step=picks_league", user.id)
         await update.message.reply_text(
-            format_fixtures_text(fixtures, date_str),
-            reply_markup=build_match_buttons(fixtures, date_str),
+            f"ElegÃ­ una liga para {date_str}:",
+            reply_markup=build_league_buttons(date_str),
         )
         return
 
@@ -706,10 +753,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return await update.message.reply_text("Número de partido inválido. Intenta de nuevo.")
 
         date_str = state.get("date") or (match.get("utcDate") or "")[:10]
+        league_key = state.get("league_key", ALL_LEAGUES_KEY)
         state["date"] = date_str  # ensure callbacks can re-resolve the match
         return await update.message.reply_text(
             match_options_text(match),
-            reply_markup=build_match_action_buttons(date_str, match.get("id"), _is_live(match.get("status"))),
+            reply_markup=build_contextual_match_action_buttons(date_str, league_key, match.get("id"), _is_live(match.get("status"))),
         )
 
     if state["step"] == "picks_date_input":
@@ -719,15 +767,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 "Fecha inválida. Usa el formato YYYY-MM-DD."
             )
 
-        fixtures = get_fixtures_for_date(date_str)
-        if not fixtures:
-            USER_STATE.pop(user.id, None)
-            return await update.message.reply_text(f"No hay partidos disponibles para {date_str}.")
-
-        USER_STATE[user.id] = {"step": "picks_select", "fixtures": fixtures, "date": date_str}
+        USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
         return await update.message.reply_text(
-            format_fixtures_text(fixtures, date_str),
-            reply_markup=build_match_buttons(fixtures, date_str),
+            f"ElegÃ­ una liga para {date_str}:",
+            reply_markup=build_league_buttons(date_str),
         )
 
     if state["step"] == "market":
@@ -887,6 +930,143 @@ async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TY
             "Selecciona una opción para ver partidos:",
             reply_markup=build_picks_keyboard(),
         )
+
+
+async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    if not query:
+        logger.warning("handle_picks_callback_v2 invocado sin callback_query")
+        return
+
+    await query.answer()
+    user = update.effective_user
+    state = USER_STATE.get(user.id)
+    data = query.data or ""
+    logger.info("picks callback v2 user_id=%s data=%s state_step=%s", user.id if user else None, data, (state or {}).get("step"))
+
+    if data == "picks_menu":
+        USER_STATE[user.id] = {"step": "picks_menu"}
+        return await query.edit_message_text(
+            "Selecciona una opciÃ³n para ver partidos:",
+            reply_markup=build_picks_keyboard(),
+        )
+
+    if data == "picks_today":
+        date_str = arg_to_date("hoy")
+        USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
+        return await query.edit_message_text(
+            f"ElegÃ­ una liga para hoy ({date_str}):",
+            reply_markup=build_league_buttons(date_str),
+        )
+
+    if data == "picks_tomorrow":
+        date_str = arg_to_date("maÃ±ana")
+        USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
+        return await query.edit_message_text(
+            f"ElegÃ­ una liga para maÃ±ana ({date_str}):",
+            reply_markup=build_league_buttons(date_str),
+        )
+
+    if data == "picks_date":
+        USER_STATE[user.id] = {"step": "picks_date_input"}
+        return await query.edit_message_text(
+            "Escribe la fecha en formato YYYY-MM-DD para ver los partidos de ese dÃ­a."
+        )
+
+    if data.startswith("picks_leagues_"):
+        date_str = data.replace("picks_leagues_", "", 1)
+        USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
+        return await query.edit_message_text(
+            f"ElegÃ­ una liga para {date_str}:",
+            reply_markup=build_league_buttons(date_str),
+        )
+
+    if data.startswith("league_"):
+        try:
+            _, date_str, league_key = data.split("_", 2)
+        except ValueError:
+            return await query.edit_message_text("No pude leer esa liga. ProbÃ¡ de nuevo desde /picks.")
+
+        fixtures = get_fixtures_for_date(date_str, league_key)
+        if not fixtures:
+            return await query.edit_message_text(
+                f"No hay partidos disponibles para {league_label(league_key)} el {date_str}.",
+                reply_markup=build_league_buttons(date_str),
+            )
+
+        USER_STATE[user.id] = {
+            "step": "picks_select",
+            "fixtures": fixtures,
+            "date": date_str,
+            "league_key": league_key,
+        }
+        return await query.edit_message_text(
+            format_fixtures_text(fixtures, date_str),
+            reply_markup=build_match_buttons(fixtures, date_str, league_key),
+        )
+
+    if data.startswith("match_"):
+        try:
+            _, date_str, league_key, match_id = data.split("_", 3)
+        except ValueError:
+            return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
+
+        match = _resolve_match(state, date_str, league_key, match_id)
+        if not match:
+            return await query.edit_message_text(
+                "No pude encontrar ese partido. Intenta de nuevo desde el menÃº."
+            )
+        if state is not None:
+            state["date"] = date_str
+            state["league_key"] = league_key
+        return await query.edit_message_text(
+            match_options_text(match),
+            reply_markup=build_contextual_match_action_buttons(date_str, league_key, match_id, _is_live(match.get("status"))),
+        )
+
+    if data.startswith("prematch_"):
+        try:
+            _, date_str, league_key, match_id = data.split("_", 3)
+        except ValueError:
+            return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
+
+        match = _resolve_match(state, date_str, league_key, match_id)
+        if not match:
+            return await query.edit_message_text(
+                "No pude encontrar ese partido. ProbÃ¡ de nuevo desde el menÃº."
+            )
+
+        await query.edit_message_text("âš™ï¸ Analizando datos previos al partido...")
+        try:
+            pre_match = dict(match)
+            pre_match["status"] = "TIMED"
+            picks_text = analyze_match(pre_match)
+        except Exception:
+            return await query.edit_message_text("âš ï¸ No se pudo analizar este partido. IntentÃ¡ de nuevo.")
+
+        return await query.edit_message_text(picks_text)
+
+    if data.startswith("live_"):
+        try:
+            _, date_str, league_key, match_id = data.split("_", 3)
+        except ValueError:
+            return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
+
+        match = _resolve_match(state, date_str, league_key, match_id)
+        if not match:
+            return await query.edit_message_text(
+                "No pude encontrar ese partido. ProbÃ¡ de nuevo desde el menÃº."
+            )
+
+        await query.edit_message_text("ðŸ”´ Trayendo estadÃ­sticas en vivo...")
+        try:
+            live_text = format_live_stats(match)
+        except Exception:
+            return await query.edit_message_text(
+                "âš ï¸ No se pudieron traer las stats en vivo. IntentÃ¡ de nuevo."
+            )
+
+        return await query.edit_message_text(live_text)
 
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
