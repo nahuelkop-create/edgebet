@@ -3,12 +3,14 @@ from dotenv import load_dotenv
 import requests
 from datetime import date, timedelta, datetime
 from typing import List, Dict, Any, Optional
+import logging
 
 load_dotenv()
 BASE_URL = "https://v3.football.api-sports.io"
 API_KEY = os.getenv("API_FOOTBALL_KEY", "").replace(" ", "").strip()
 
 HEADERS = {"x-apisports-key": API_KEY} if API_KEY else {}
+logger = logging.getLogger(__name__)
 
 # World Cup 2026 league ID
 WORLD_CUP_LEAGUE_ID = 1
@@ -28,7 +30,48 @@ def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     url = f"{BASE_URL}{path}"
     response = requests.get(url, headers=HEADERS, params=params, timeout=15)
     response.raise_for_status()
-    return response.json()
+    data = response.json()
+    errors = data.get("errors") if isinstance(data, dict) else None
+    if errors:
+        raise RuntimeError(f"API-Football error: {errors}")
+    return data
+
+
+def _fixture_matches_date(fixture: Dict[str, Any], date_str: str) -> bool:
+    fixture_date = fixture.get("fixture", {}).get("date")
+    if not fixture_date:
+        return False
+    return str(fixture_date)[:10] == date_str
+
+
+def _format_fixture(fixture: Dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "id": fixture.get("fixture", {}).get("id"),
+        "homeTeam": {
+            "name": fixture.get("teams", {}).get("home", {}).get("name"),
+            "id": fixture.get("teams", {}).get("home", {}).get("id"),
+        },
+        "awayTeam": {
+            "name": fixture.get("teams", {}).get("away", {}).get("name"),
+            "id": fixture.get("teams", {}).get("away", {}).get("id"),
+        },
+        "competition": {
+            "name": fixture.get("league", {}).get("name"),
+            "id": fixture.get("league", {}).get("id"),
+        },
+        "utcDate": fixture.get("fixture", {}).get("date"),
+        "referee": fixture.get("fixture", {}).get("referee"),
+        "status": fixture.get("fixture", {}).get("status", {}).get("short"),
+        "stage": fixture.get("league", {}).get("round"),
+        "group": "",
+        "matchday": 1,
+        "score": {
+            "fullTime": {
+                "home": fixture.get("goals", {}).get("home"),
+                "away": fixture.get("goals", {}).get("away"),
+            }
+        },
+    }
 
 
 def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]:
@@ -37,52 +80,62 @@ def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]
         date_str = (datetime.utcnow() - timedelta(hours=3)).date().isoformat()
 
     fixtures: List[Dict[str, Any]] = []
-    try:
-        # API v3 endpoint for fixtures
-        params = {
-            "date": date_str,
-            "league": WORLD_CUP_LEAGUE_ID,
-            "season": 2026
-        }
-        data = _get("/fixtures", params=params)
-        
-        for fixture in data.get("response", []):
+    queries = [
+        (
+            "date",
+            {
+                "date": date_str,
+                "league": WORLD_CUP_LEAGUE_ID,
+                "season": 2026,
+            },
+            None,
+        ),
+        (
+            "season",
+            {
+                "league": WORLD_CUP_LEAGUE_ID,
+                "season": 2026,
+            },
+            date_str,
+        ),
+        (
+            "date_status_ns",
+            {
+                "date": date_str,
+                "league": WORLD_CUP_LEAGUE_ID,
+                "season": 2026,
+                "status": "NS",
+            },
+            None,
+        ),
+    ]
+
+    for query_name, params, filter_date in queries:
+        try:
+            data = _get("/fixtures", params=params)
+        except requests.HTTPError:
+            logger.exception("HTTP error fetching fixtures with params=%s", params)
+            raise
+
+        raw_fixtures = data.get("response", [])
+        if filter_date:
+            raw_fixtures = [f for f in raw_fixtures if _fixture_matches_date(f, filter_date)]
+
+        logger.info(
+            "API-Football fixtures query=%s date=%s results=%s",
+            query_name,
+            date_str,
+            len(raw_fixtures),
+        )
+
+        for fixture in raw_fixtures:
             try:
-                fixture_data = {
-                    "id": fixture.get("fixture", {}).get("id"),
-                    "homeTeam": {
-                        "name": fixture.get("teams", {}).get("home", {}).get("name"),
-                        "id": fixture.get("teams", {}).get("home", {}).get("id"),
-                    },
-                    "awayTeam": {
-                        "name": fixture.get("teams", {}).get("away", {}).get("name"),
-                        "id": fixture.get("teams", {}).get("away", {}).get("id"),
-                    },
-                    "competition": {
-                        "name": fixture.get("league", {}).get("name"),
-                        "id": fixture.get("league", {}).get("id"),
-                    },
-                    "utcDate": fixture.get("fixture", {}).get("date"),
-                    "referee": fixture.get("fixture", {}).get("referee"),
-                    "status": fixture.get("fixture", {}).get("status", {}).get("short"),
-                    "stage": fixture.get("league", {}).get("round"),
-                    "group": "",
-                    "matchday": 1,
-                    "score": {
-                        "fullTime": {
-                            "home": fixture.get("goals", {}).get("home"),
-                            "away": fixture.get("goals", {}).get("away"),
-                        }
-                    }
-                }
-                fixtures.append(fixture_data)
+                fixtures.append(_format_fixture(fixture))
             except Exception:
-                continue
-                
-    except requests.HTTPError as e:
-        pass
-    except Exception as e:
-        pass
+                logger.exception("Could not parse fixture payload: %s", fixture)
+
+        if fixtures:
+            return fixtures
 
     return fixtures
 
