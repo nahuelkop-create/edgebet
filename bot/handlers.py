@@ -57,6 +57,10 @@ PICK_LEAGUES = [
 ]
 PICK_LEAGUE_BY_KEY = {league["key"]: league for league in PICK_LEAGUES}
 ALL_LEAGUES_KEY = "all"
+API_LIMIT_MESSAGE = (
+    "⚠️ Servicio temporalmente no disponible. Los requests de la API se renuevan "
+    "a las 00:00 UTC. Intentá de nuevo más tarde."
+)
 
 USER_STATE: Dict[int, Dict[str, Any]] = {}
 
@@ -68,6 +72,11 @@ LIVE_STATUSES = {"1H", "2H", "HT", "ET", "BT", "P", "LIVE", "INT", "SUSP"}
 
 def _is_live(status: Any) -> bool:
     return str(status or "").upper() in LIVE_STATUSES
+
+
+def _is_api_limit_error(exc: RuntimeError) -> bool:
+    message = str(exc).lower()
+    return "api-football error" in message and "requests" in message and "limit" in message
 
 
 def arg_to_date(arg: str) -> Optional[str]:
@@ -99,8 +108,8 @@ def build_league_buttons(date_str: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(league["label"], callback_data=f"league_{date_str}_{league['key']}")]
         for league in PICK_LEAGUES
     ]
-    buttons.append([InlineKeyboardButton("ðŸ“‹ Todos los partidos", callback_data=f"league_{date_str}_{ALL_LEAGUES_KEY}")])
-    buttons.append([InlineKeyboardButton("â†©ï¸ Volver", callback_data="picks_menu")])
+    buttons.append([InlineKeyboardButton("Ver todos los partidos", callback_data=f"league_{date_str}_{ALL_LEAGUES_KEY}")])
+    buttons.append([InlineKeyboardButton("← Volver", callback_data="picks_menu")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -126,7 +135,7 @@ def build_match_buttons(fixtures: list, date_str: str, league_key: str) -> Inlin
         away = match.get("awayTeam", {}).get("name", "Visitante")
         callback_data = f"match_{date_str}_{league_key}_{match_id}"
         buttons.append([InlineKeyboardButton(f"{home} vs {away}", callback_data=callback_data)])
-    buttons.append([InlineKeyboardButton("↩️ Volver a ligas", callback_data=f"picks_leagues_{date_str}")])
+    buttons.append([InlineKeyboardButton("← Volver a ligas", callback_data=f"picks_leagues_{date_str}")])
     return InlineKeyboardMarkup(buttons)
 
 
@@ -155,7 +164,7 @@ def build_match_action_buttons(date_str: str, league_key: str, match_id, is_live
     rows = [[InlineKeyboardButton("📊 Picks pre-partido", callback_data=f"prematch_{date_str}_{match_id}")]]
     if is_live:
         rows.append([InlineKeyboardButton("🔴 En vivo", callback_data=f"live_{date_str}_{match_id}")])
-    rows.append([InlineKeyboardButton("↩️ Volver a partidos", callback_data="picks_menu")])
+    rows.append([InlineKeyboardButton("← Volver a partidos", callback_data="picks_menu")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -165,7 +174,7 @@ def build_contextual_match_action_buttons(date_str: str, league_key: str, match_
     ]
     if is_live:
         rows.append([InlineKeyboardButton("ðŸ”´ En vivo", callback_data=f"live_{date_str}_{league_key}_{match_id}")])
-    rows.append([InlineKeyboardButton("â†©ï¸ Volver a partidos", callback_data=f"league_{date_str}_{league_key}")])
+    rows.append([InlineKeyboardButton("← Volver a partidos", callback_data=f"league_{date_str}_{league_key}")])
     return InlineKeyboardMarkup(rows)
 
 
@@ -987,7 +996,12 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         except ValueError:
             return await query.edit_message_text("No pude leer esa liga. ProbÃ¡ de nuevo desde /picks.")
 
-        fixtures = get_fixtures_for_date(date_str, league_key)
+        try:
+            fixtures = get_fixtures_for_date(date_str, league_key)
+        except RuntimeError as exc:
+            if _is_api_limit_error(exc):
+                return await query.edit_message_text(API_LIMIT_MESSAGE)
+            raise
         if not fixtures:
             return await query.edit_message_text(
                 f"No hay partidos disponibles para {league_label(league_key)} el {date_str}.",
@@ -1011,7 +1025,12 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         except ValueError:
             return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
 
-        match = _resolve_match(state, date_str, league_key, match_id)
+        try:
+            match = _resolve_match(state, date_str, league_key, match_id)
+        except RuntimeError as exc:
+            if _is_api_limit_error(exc):
+                return await query.edit_message_text(API_LIMIT_MESSAGE)
+            raise
         if not match:
             return await query.edit_message_text(
                 "No pude encontrar ese partido. Intenta de nuevo desde el menÃº."
@@ -1030,7 +1049,12 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         except ValueError:
             return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
 
-        match = _resolve_match(state, date_str, league_key, match_id)
+        try:
+            match = _resolve_match(state, date_str, league_key, match_id)
+        except RuntimeError as exc:
+            if _is_api_limit_error(exc):
+                return await query.edit_message_text(API_LIMIT_MESSAGE)
+            raise
         if not match:
             return await query.edit_message_text(
                 "No pude encontrar ese partido. ProbÃ¡ de nuevo desde el menÃº."
@@ -1052,7 +1076,12 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         except ValueError:
             return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
 
-        match = _resolve_match(state, date_str, league_key, match_id)
+        try:
+            match = _resolve_match(state, date_str, league_key, match_id)
+        except RuntimeError as exc:
+            if _is_api_limit_error(exc):
+                return await query.edit_message_text(API_LIMIT_MESSAGE)
+            raise
         if not match:
             return await query.edit_message_text(
                 "No pude encontrar ese partido. ProbÃ¡ de nuevo desde el menÃº."
