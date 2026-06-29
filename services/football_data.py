@@ -2,8 +2,9 @@ import os
 from dotenv import load_dotenv
 import requests
 from datetime import date, timedelta, datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 import logging
+import time
 
 load_dotenv()
 BASE_URL = "https://v3.football.api-sports.io"
@@ -11,6 +12,8 @@ API_KEY = os.getenv("API_FOOTBALL_KEY", "").replace(" ", "").strip()
 
 HEADERS = {"x-apisports-key": API_KEY} if API_KEY else {}
 logger = logging.getLogger(__name__)
+FIXTURES_CACHE_TTL_SECONDS = 10 * 60
+_fixtures_by_date_cache: Dict[str, Tuple[float, List[Dict[str, Any]]]] = {}
 
 # World Cup 2026 league ID
 WORLD_CUP_LEAGUE_ID = 1
@@ -74,10 +77,33 @@ def _format_fixture(fixture: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _get_cached_fixtures(date_str: str) -> Optional[List[Dict[str, Any]]]:
+    cached = _fixtures_by_date_cache.get(date_str)
+    if not cached:
+        return None
+
+    cached_at, fixtures = cached
+    if time.monotonic() - cached_at >= FIXTURES_CACHE_TTL_SECONDS:
+        _fixtures_by_date_cache.pop(date_str, None)
+        return None
+
+    logger.info("Using cached fixtures for date=%s count=%s", date_str, len(fixtures))
+    return [dict(fixture) for fixture in fixtures]
+
+
+def _cache_fixtures(date_str: str, fixtures: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    _fixtures_by_date_cache[date_str] = (time.monotonic(), [dict(fixture) for fixture in fixtures])
+    return fixtures
+
+
 def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]:
     """Get fixtures for a specific date"""
     if date_str is None:
         date_str = (datetime.utcnow() - timedelta(hours=3)).date().isoformat()
+
+    cached = _get_cached_fixtures(date_str)
+    if cached is not None:
+        return cached
 
     fixtures: List[Dict[str, Any]] = []
     queries = [
@@ -135,9 +161,9 @@ def get_fixtures_by_date(date_str: Optional[str] = None) -> List[Dict[str, Any]]
                 logger.exception("Could not parse fixture payload: %s", fixture)
 
         if fixtures:
-            return fixtures
+            return _cache_fixtures(date_str, fixtures)
 
-    return fixtures
+    return _cache_fixtures(date_str, fixtures)
 
 
 def get_fixtures_today() -> List[Dict[str, Any]]:

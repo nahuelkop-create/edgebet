@@ -2,10 +2,10 @@
 
 Background daemon threads (started from run_bot.py via start_schedulers()):
 
-1. Pre-match (every 30 min): for each of today's fixtures kicking off within the
+1. Pre-match (every 60 min): for each of today's fixtures kicking off within the
    next two hours, send the full Claude analysis to every user once (deduped in
    the DB so it never repeats).
-2. Results (every 15 min): for each pending bet whose fixture has finished,
+2. Results (every 30 min): for each pending bet whose fixture has finished,
    grade every pick from the real API result/stats, send a detailed settlement
    message and update the balance. Bets without fixture_id are matched by name
    against fixtures from the bet date.
@@ -53,11 +53,11 @@ TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN", "").strip()
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 PRE_MATCH_WINDOW_SECONDS = 2 * 60 * 60  # notify when kickoff is <= 2h away
-PRE_MATCH_INTERVAL = 30 * 60            # scheduler: pre-match check every 30 min
-RESULTS_INTERVAL = 15 * 60             # scheduler: results check every 15 min
-FIXTURES_COLLECTOR_INTERVAL = 60 * 60   # scheduler: upcoming fixtures every 60 min
-STATS_COLLECTOR_INTERVAL = 15 * 60      # scheduler: finished match stats every 15 min
-ODDS_COLLECTOR_INTERVAL = 30 * 60       # scheduler: odds snapshots every 30 min
+PRE_MATCH_INTERVAL = 60 * 60            # scheduler: pre-match check every 60 min
+RESULTS_INTERVAL = 30 * 60              # scheduler: results check every 30 min
+FIXTURES_COLLECTOR_INTERVAL = 6 * 60 * 60  # scheduler: upcoming fixtures every 6h
+STATS_COLLECTOR_INTERVAL = 2 * 60 * 60     # scheduler: finished match stats every 2h
+ODDS_COLLECTOR_INTERVAL = 2 * 60 * 60      # scheduler: odds snapshots every 2h
 
 
 # --------------------------------------------------------------------------- #
