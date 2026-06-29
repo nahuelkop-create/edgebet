@@ -1,8 +1,10 @@
 import logging
-from datetime import datetime
+import threading
+from datetime import datetime, timedelta
 from typing import Any
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.connection import get_session
 from db.models import Fixture, ModelPerformance, OddsSnapshot, Prediction, Team, TeamStat
@@ -12,6 +14,19 @@ MODEL_NAME = "corners_logistic_regression_v1"
 MARKET = "corners_over_9_5"
 CORNER_LINE = 9.5
 MIN_TRAINING_ROWS = 20
+TEST_FRACTION = 0.2  # last 20% of fixtures (chronological) used for evaluation
+MODEL_CACHE_TTL = timedelta(hours=24)
+
+# In-memory cache for the trained production model so predict() does not retrain
+# the whole logistic regression on every call. Guarded by a lock because
+# predictions can be requested from several scheduler/bot threads at once.
+_MODEL_CACHE: dict[str, Any] = {
+    "model": None,
+    "feature_columns": [],
+    "trained_at": None,
+    "row_count": -1,
+}
+_MODEL_CACHE_LOCK = threading.Lock()
 FEATURE_COLUMNS = [
     "home_corners_avg_5",
     "away_corners_avg_5",
@@ -102,13 +117,49 @@ def _latest_corner_odds(session, fixture_id: int) -> tuple[float | None, float |
     return snapshot.over_odds, snapshot.under_odds
 
 
-def _prepare_matrix(dataset):
+def _prepare_matrix(dataset, feature_cols: list[str] | None = None):
     pd = __import__("pandas")
     df = dataset.copy()
     if "league" in df.columns:
         df = pd.get_dummies(df, columns=["league"], dummy_na=False)
-    feature_cols = [c for c in df.columns if c in FEATURE_COLUMNS or c.startswith("league_")]
+    if feature_cols is None:
+        feature_cols = [c for c in df.columns if c in FEATURE_COLUMNS or c.startswith("league_")]
+    else:
+        for col in feature_cols:
+            if col not in df.columns:
+                df[col] = 0
     return df, feature_cols
+
+
+def _fit_model(dataset):
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.pipeline import Pipeline
+    from sklearn.preprocessing import StandardScaler
+
+    if dataset.empty or len(dataset) < MIN_TRAINING_ROWS:
+        return {
+            "model": None,
+            "feature_columns": [],
+            "error": f"histÃ³rico insuficiente ({len(dataset)} filas)",
+        }
+    if dataset["target_over_9_5"].nunique() < 2:
+        return {
+            "model": None,
+            "feature_columns": [],
+            "error": "histÃ³rico con una sola clase para corners",
+        }
+
+    matrix, feature_cols = _prepare_matrix(dataset)
+    X = matrix[feature_cols].fillna(0)
+    y = matrix["target_over_9_5"]
+    model = Pipeline(
+        steps=[
+            ("scaler", StandardScaler()),
+            ("logreg", LogisticRegression(max_iter=1000, random_state=42)),
+        ]
+    )
+    model.fit(X, y)
+    return {"model": model, "feature_columns": feature_cols, "error": None}
 
 
 def build_dataset():
@@ -159,11 +210,10 @@ def build_dataset():
 
 def train_model():
     """Train a logistic regression model for Over 9.5 corners."""
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.pipeline import Pipeline
-    from sklearn.preprocessing import StandardScaler
-
     dataset = build_dataset()
+    trained = _fit_model(dataset)
+    trained["dataset"] = dataset
+    return trained
     if dataset.empty or len(dataset) < MIN_TRAINING_ROWS:
         return {
             "model": None,
@@ -192,6 +242,28 @@ def train_model():
     return {"model": model, "dataset": dataset, "feature_columns": feature_cols, "error": None}
 
 
+def _get_cached_trained_model() -> dict[str, Any]:
+    now = datetime.utcnow()
+    with _MODEL_CACHE_LOCK:
+        trained_at = _MODEL_CACHE.get("trained_at")
+        if _MODEL_CACHE.get("model") is not None and trained_at and now - trained_at < MODEL_CACHE_TTL:
+            return {
+                "model": _MODEL_CACHE["model"],
+                "feature_columns": list(_MODEL_CACHE["feature_columns"]),
+                "error": None,
+            }
+
+        trained = train_model()
+        if not trained.get("error"):
+            _MODEL_CACHE.update({
+                "model": trained["model"],
+                "feature_columns": list(trained["feature_columns"]),
+                "trained_at": now,
+                "row_count": len(trained.get("dataset", [])),
+            })
+        return trained
+
+
 def _prediction_features(session, fixture_id: int, feature_cols: list[str]):
     pd = __import__("pandas")
     fixture = session.get(Fixture, fixture_id)
@@ -216,7 +288,7 @@ def _confidence(probability_over: float) -> int:
 def predict(fixture_id: int) -> dict[str, Any]:
     """Return Over/Under 9.5 corners probabilities and value information."""
     try:
-        trained = train_model()
+        trained = _get_cached_trained_model()
     except Exception as exc:
         logging.exception("[corners_model] error entrenando modelo")
         return {"available": False, "fixture_id": fixture_id, "error": str(exc)}
@@ -243,20 +315,26 @@ def predict(fixture_id: int) -> dict[str, Any]:
         real_odds = real_over if selected_is_over else real_under
         model_probability = max(probability_over, probability_under)
         fair_odds = fair_over if selected_is_over else fair_under
+        selected_market = MARKET if selected_is_over else "corners_under_9_5"
         expected_value = (model_probability * real_odds - 1) if real_odds else None
         confidence = _confidence(probability_over)
         recommended = bool(real_odds and expected_value and expected_value > 0 and confidence >= 60)
 
-        session.add(
-            Prediction(
-                fixture_id=fixture_id,
-                market=MARKET if selected_is_over else "corners_under_9_5",
-                probability=round(model_probability, 4),
-                fair_odds=fair_odds,
-                real_odds=real_odds,
-                expected_value=round(expected_value, 4) if expected_value is not None else None,
-                confidence=confidence,
-                recommended=recommended,
+        prediction_values = {
+            "fixture_id": fixture_id,
+            "market": selected_market,
+            "probability": round(model_probability, 4),
+            "fair_odds": fair_odds,
+            "real_odds": real_odds,
+            "expected_value": round(expected_value, 4) if expected_value is not None else None,
+            "confidence": confidence,
+            "recommended": recommended,
+        }
+        stmt = pg_insert(Prediction).values(**prediction_values)
+        session.execute(
+            stmt.on_conflict_do_update(
+                index_elements=["fixture_id", "market"],
+                set_={key: value for key, value in prediction_values.items() if key not in {"fixture_id", "market"}},
             )
         )
         session.commit()
@@ -279,23 +357,30 @@ def predict(fixture_id: int) -> dict[str, Any]:
 
 
 def evaluate_model() -> dict[str, Any]:
-    """Evaluate hit rate and simulated ROI, then store model performance."""
-    trained = train_model()
-    dataset = trained.get("dataset")
+    """Evaluate hit rate and simulated ROI on the most recent 20% only."""
+    dataset = build_dataset()
+    if dataset.empty or len(dataset) < MIN_TRAINING_ROWS:
+        return {"available": False, "error": f"histÃ³rico insuficiente ({len(dataset)} filas)"}
+
+    split_index = max(1, int(len(dataset) * (1 - TEST_FRACTION)))
+    if split_index >= len(dataset):
+        split_index = len(dataset) - 1
+
+    train_dataset = dataset.iloc[:split_index].copy()
+    test_dataset = dataset.iloc[split_index:].copy()
+    trained = _fit_model(train_dataset)
     if trained.get("error"):
         return {"available": False, "error": trained["error"]}
 
-    matrix, feature_cols = _prepare_matrix(dataset)
-    X = matrix[feature_cols].fillna(0)
-    y = matrix["target_over_9_5"]
-    probabilities = trained["model"].predict_proba(X)[:, 1]
-    picks = probabilities >= 0.5
-    hits = (picks.astype(int) == y.to_numpy()).sum()
-    hit_rate = round(float(hits / len(y)), 4) if len(y) else 0.0
+    test_matrix, feature_cols = _prepare_matrix(test_dataset, trained["feature_columns"])
+    X_test = test_matrix[feature_cols].fillna(0)
+    y_test = test_matrix["target_over_9_5"]
+    probabilities = trained["model"].predict_proba(X_test)[:, 1]
 
     profit = 0.0
     stake = 1.0
-    bets = 0
+    total_picks = 0
+    hits = 0
     try:
         session = get_session()
     except RuntimeError:
@@ -303,15 +388,18 @@ def evaluate_model() -> dict[str, Any]:
 
     if session is not None:
         with session:
-            for fixture_id, probability, actual in zip(dataset["fixture_id"], probabilities, y):
+            for fixture_id, probability, actual in zip(test_dataset["fixture_id"], probabilities, y_test):
                 over_odds, under_odds = _latest_corner_odds(session, int(fixture_id))
                 if probability >= 0.5 and over_odds:
                     profit += (over_odds - 1) * stake if actual == 1 else -stake
-                    bets += 1
+                    total_picks += 1
+                    hits += 1 if actual == 1 else 0
                 elif probability < 0.5 and under_odds:
                     profit += (under_odds - 1) * stake if actual == 0 else -stake
-                    bets += 1
-            roi = round(profit / bets, 4) if bets else 0.0
+                    total_picks += 1
+                    hits += 1 if actual == 0 else 0
+            hit_rate = round(float(hits / total_picks), 4) if total_picks else 0.0
+            roi = round(profit / total_picks, 4) if total_picks else 0.0
             session.execute(
                 delete(ModelPerformance).where(
                     ModelPerformance.model_name == MODEL_NAME,
@@ -324,13 +412,16 @@ def evaluate_model() -> dict[str, Any]:
                     market=MARKET,
                     hit_rate=hit_rate,
                     roi=roi,
-                    sample_size=int(len(dataset)),
+                    sample_size=int(len(test_dataset)),
+                    total_picks=total_picks,
                     last_updated=datetime.utcnow(),
                 )
             )
             session.commit()
     else:
+        hit_rate = 0.0
         roi = 0.0
+        total_picks = 0
 
     return {
         "available": True,
@@ -338,5 +429,8 @@ def evaluate_model() -> dict[str, Any]:
         "market": MARKET,
         "hit_rate": hit_rate,
         "roi": roi,
-        "sample_size": int(len(dataset)),
+        "sample_size": int(len(test_dataset)),
+        "train_size": int(len(train_dataset)),
+        "test_size": int(len(test_dataset)),
+        "total_picks": total_picks,
     }

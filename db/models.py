@@ -7,7 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     Integer,
     String,
-    Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -98,6 +98,11 @@ class OddsSnapshot(Base):
 
 class Prediction(Base):
     __tablename__ = "predictions"
+    # One stored prediction per (fixture, market): predict() upserts on these
+    # columns instead of inserting a new row every time a fixture is analyzed.
+    __table_args__ = (
+        UniqueConstraint("fixture_id", "market", name="uq_predictions_fixture_market"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
@@ -110,22 +115,8 @@ class Prediction(Base):
     recommended: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
 
-class Bet(Base):
-    __tablename__ = "bets"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
-    user_id: Mapped[int | None] = mapped_column(Integer)
-    picks: Mapped[str | None] = mapped_column(Text)
-    stake: Mapped[float | None] = mapped_column(Float)
-    odds: Mapped[float | None] = mapped_column(Float)
-    result: Mapped[str | None] = mapped_column(String(50))
-    profit: Mapped[float | None] = mapped_column(Float)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
-        default=datetime.utcnow,
-        nullable=False,
-    )
+# NOTE: bets are stored exclusively in SQLite (services/database.py). There is no
+# PostgreSQL bets table on purpose, to avoid a second, unused source of truth.
 
 
 class ModelPerformance(Base):
@@ -137,6 +128,9 @@ class ModelPerformance(Base):
     hit_rate: Mapped[float | None] = mapped_column(Float)
     roi: Mapped[float | None] = mapped_column(Float)
     sample_size: Mapped[int | None] = mapped_column(Integer)
+    # Real number of picks evaluated on the held-out test set (not the full
+    # dataset size, which is stored in sample_size).
+    total_picks: Mapped[int | None] = mapped_column(Integer)
     last_updated: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         default=datetime.utcnow,

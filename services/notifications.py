@@ -29,6 +29,7 @@ from dotenv import load_dotenv
 from collectors.fixtures_collector import collect_upcoming_fixtures
 from collectors.odds_collector import collect_odds
 from collectors.stats_collector import collect_finished_match_stats
+from models.corners_model import evaluate_model
 from services.anthropic_client import analyze_match
 from services.football_data import (
     _get,
@@ -58,6 +59,7 @@ RESULTS_INTERVAL = 30 * 60              # scheduler: results check every 30 min
 FIXTURES_COLLECTOR_INTERVAL = 6 * 60 * 60  # scheduler: upcoming fixtures every 6h
 STATS_COLLECTOR_INTERVAL = 2 * 60 * 60     # scheduler: finished match stats every 2h
 ODDS_COLLECTOR_INTERVAL = 2 * 60 * 60      # scheduler: odds snapshots every 2h
+MODEL_EVALUATION_INTERVAL = 24 * 60 * 60   # scheduler: model backtest every 24h
 
 
 # --------------------------------------------------------------------------- #
@@ -626,6 +628,22 @@ def check_result_notifications() -> int:
     return resolved_count
 
 
+def evaluate_corners_model_job() -> int:
+    result = evaluate_model()
+    if not result.get("available"):
+        logging.info("[model-corners] evaluaciÃ³n no disponible: %s", result.get("error"))
+        return 0
+
+    logging.info(
+        "[model-corners] hit_rate=%s roi=%s total_picks=%s test_size=%s",
+        result.get("hit_rate"),
+        result.get("roi"),
+        result.get("total_picks"),
+        result.get("test_size"),
+    )
+    return int(result.get("total_picks") or 0)
+
+
 # --------------------------------------------------------------------------- #
 # Threading scheduler (no APScheduler)
 # --------------------------------------------------------------------------- #
@@ -672,14 +690,20 @@ def start_schedulers():
         args=(collect_odds, ODDS_COLLECTOR_INTERVAL, 120, "collector-odds"),
         daemon=True,
     ).start()
+    threading.Thread(
+        target=_run_loop,
+        args=(evaluate_corners_model_job, MODEL_EVALUATION_INTERVAL, 180, "model-corners"),
+        daemon=True,
+    ).start()
     logging.info(
         (
             "Schedulers iniciados: pre-partido cada %smin, resultados cada %smin, "
-            "fixtures cada %smin, stats cada %smin, odds cada %smin."
+            "fixtures cada %smin, stats cada %smin, odds cada %smin, modelo cada %sh."
         ),
         PRE_MATCH_INTERVAL // 60,
         RESULTS_INTERVAL // 60,
         FIXTURES_COLLECTOR_INTERVAL // 60,
         STATS_COLLECTOR_INTERVAL // 60,
         ODDS_COLLECTOR_INTERVAL // 60,
+        MODEL_EVALUATION_INTERVAL // 3600,
     )
