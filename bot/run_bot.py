@@ -46,7 +46,10 @@ async def _log_handler_error(update, context):
     message = getattr(update, "effective_message", None) if update else None
     if message:
         try:
-            await message.reply_text("⚠️ Ocurrió un error procesando el comando. Revisá los logs.")
+            await message.reply_text(
+                "⚠️ Ocurrió un error procesando el comando. Revisá los logs.",
+                parse_mode=None,
+            )
         except Exception:
             logging.exception("No se pudo enviar mensaje de error al usuario.")
 

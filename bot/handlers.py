@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 import base64
 import logging
 import os
@@ -28,6 +29,21 @@ from services.football_data import (
 )
 
 logger = logging.getLogger(__name__)
+DEFAULT_PARSE_MODE = None
+
+
+def _utf8_text(text: Any) -> str:
+    if isinstance(text, bytes):
+        return text.decode("utf-8")
+    return str(text)
+
+
+async def _reply_text(message, text: Any, **kwargs):
+    return await message.reply_text(_utf8_text(text), parse_mode=DEFAULT_PARSE_MODE, **kwargs)
+
+
+async def _edit_message_text(query, text: Any, **kwargs):
+    return await query.edit_message_text(_utf8_text(text), parse_mode=DEFAULT_PARSE_MODE, **kwargs)
 
 LEAGUES = [
     "Torneo Argentino / Copa Argentina",
@@ -170,10 +186,10 @@ def build_match_action_buttons(date_str: str, league_key: str, match_id, is_live
 
 def build_contextual_match_action_buttons(date_str: str, league_key: str, match_id, is_live: bool) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton("ðŸ“Š Picks pre-partido", callback_data=f"prematch_{date_str}_{league_key}_{match_id}")]
+        [InlineKeyboardButton("📊 Picks pre-partido", callback_data=f"prematch_{date_str}_{league_key}_{match_id}")]
     ]
     if is_live:
-        rows.append([InlineKeyboardButton("ðŸ”´ En vivo", callback_data=f"live_{date_str}_{league_key}_{match_id}")])
+        rows.append([InlineKeyboardButton("🔴 En vivo", callback_data=f"live_{date_str}_{league_key}_{match_id}")])
     rows.append([InlineKeyboardButton("← Volver a partidos", callback_data=f"league_{date_str}_{league_key}")])
     return InlineKeyboardMarkup(rows)
 
@@ -328,7 +344,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "• /balance - ver tu rendimiento\n"
         "• /picks - generar picks con análisis de Claude"
     )
-    return await update.message.reply_text(text)
+    return await _reply_text(update.message, text)
 
 
 # ---------------------------------------------------------------------------
@@ -393,12 +409,12 @@ async def apuesta(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fixtures.append(m)
 
     if not fixtures:
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             f"No hay partidos disponibles para hoy ni mañana ({today_str} / {tomorrow_str})."
         )
 
     USER_STATE[user.id] = {"step": "apuesta_match", "fixtures": fixtures, "date": today_str}
-    return await update.message.reply_text(
+    return await _reply_text(update.message, 
         f"📝 Nueva apuesta — partidos de hoy y mañana.\n¿A qué partido querés apostar?",
         reply_markup=build_bet_match_buttons(fixtures),
     )
@@ -433,9 +449,9 @@ async def resultado(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     pending = get_pending_bets(user.id)
     if not pending:
-        return await update.message.reply_text("No tenés apuestas pendientes. 🎉")
+        return await _reply_text(update.message, "No tenés apuestas pendientes. 🎉")
 
-    return await update.message.reply_text(
+    return await _reply_text(update.message, 
         "Apuestas pendientes. Elegí cuál querés cerrar:",
         reply_markup=build_pending_buttons(pending),
     )
@@ -457,7 +473,7 @@ async def handle_bet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             fixtures = state.get("fixtures", [])
             match = fixtures[idx]
         except (ValueError, IndexError):
-            return await query.edit_message_text(
+            return await _edit_message_text(query, 
                 "No pude identificar ese partido. Usá /apuesta de nuevo."
             )
         home = match.get("homeTeam", {}).get("name", "Local")
@@ -470,7 +486,7 @@ async def handle_bet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
             "fixture_id": match.get("id"),
         })
         USER_STATE[user.id] = state
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             f"Partido: {home} vs {away}\n\n¿Qué pick querés registrar? Describilo libremente "
             "(ej: 'Mbappé +2 remates al arco')."
         )
@@ -480,16 +496,16 @@ async def handle_bet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             bet_id = int(data.rsplit("_", 1)[1])
         except ValueError:
-            return await query.edit_message_text("Apuesta inválida.")
+            return await _edit_message_text(query, "Apuesta inválida.")
         bet = get_bet(bet_id)
         if not bet or bet.get("result") is not None:
-            return await query.edit_message_text("Esa apuesta ya no está pendiente.")
+            return await _edit_message_text(query, "Esa apuesta ya no está pendiente.")
         label = bet.get("match_name") or bet.get("league") or "Apuesta"
         buttons = InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Ganada", callback_data=f"resw_{bet_id}"),
             InlineKeyboardButton("❌ Perdida", callback_data=f"resl_{bet_id}"),
         ]])
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             f"#{bet_id} {label}\nPick: {bet.get('pick')}\nStake: {bet['stake']:.2f} @ {bet['odds']}\n\n"
             "¿Cómo salió?",
             reply_markup=buttons,
@@ -501,10 +517,10 @@ async def handle_bet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
         try:
             bet_id = int(data.rsplit("_", 1)[1])
         except ValueError:
-            return await query.edit_message_text("Apuesta inválida.")
+            return await _edit_message_text(query, "Apuesta inválida.")
         bet = get_bet(bet_id)
         if not bet or bet.get("result") is not None:
-            return await query.edit_message_text("Esa apuesta ya fue cerrada.")
+            return await _edit_message_text(query, "Esa apuesta ya fue cerrada.")
 
         profit = _profit_for(result, bet["stake"], bet["odds"])
         resolve_bet(bet_id, result, profit)
@@ -513,7 +529,7 @@ async def handle_bet_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
         emoji = "✅" if result == "ganada" else "❌"
         sign = "+" if profit >= 0 else ""
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             f"{emoji} Apuesta #{bet_id} marcada como {result}.\n"
             f"Resultado: {sign}{profit:.2f}\n\n"
             "Usá /balance para ver tu rendimiento actualizado."
@@ -524,7 +540,7 @@ async def newbet(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     USER_STATE[user.id] = {"step": "league"}
     leagues_text = "\n".join(f"{i+1}. {league}" for i, league in enumerate(LEAGUES))
-    await update.message.reply_text(
+    await _reply_text(update.message, 
         "Seleccione la liga para la apuesta:\n" + leagues_text + "\nEnvía el número de la liga."
     )
 
@@ -534,25 +550,28 @@ async def picks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     args = context.args or []
     chat_id = update.effective_chat.id if update.effective_chat else None
     logger.info("/picks recibido user_id=%s chat_id=%s args=%s", user.id if user else None, chat_id, args)
+    if user:
+        USER_STATE.pop(user.id, None)
+        logger.debug("/picks estado reiniciado user_id=%s", user.id)
 
     if args:
         date_arg = " ".join(args)
         date_str = arg_to_date(date_arg)
         logger.debug("/picks fecha parseada user_id=%s date_arg=%s date_str=%s", user.id, date_arg, date_str)
         if not date_str:
-            return await update.message.reply_text(
+            return await _reply_text(update.message, 
                 "Formato inválido. Usa /picks hoy, /picks mañana o /picks YYYY-MM-DD."
             )
         USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
         logger.debug("/picks estado actualizado user_id=%s step=picks_league", user.id)
-        await update.message.reply_text(
-            f"ElegÃ­ una liga para {date_str}:",
+        await _reply_text(update.message, 
+            f"Elegí una liga para {date_str}:",
             reply_markup=build_league_buttons(date_str),
         )
         return
 
     logger.debug("/picks mostrando menu user_id=%s", user.id if user else None)
-    await update.message.reply_text(
+    await _reply_text(update.message, 
         "Selecciona una opción para ver partidos:",
         reply_markup=build_picks_keyboard(),
     )
@@ -593,7 +612,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not photos:
         return
 
-    await update.message.reply_text("🔍 Analizando la imagen de tu apuesta...")
+    await _reply_text(update.message, "🔍 Analizando la imagen de tu apuesta...")
 
     # Largest available size is the last entry. Download it to a temp file and
     # convert to base64 for Claude Vision.
@@ -607,7 +626,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(tmp_path, "rb") as fh:
             image_b64 = base64.b64encode(fh.read()).decode("utf-8")
     except Exception:
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "⚠️ No pude descargar la imagen. Probá enviarla de nuevo."
         )
     finally:
@@ -617,7 +636,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         parsed = analyze_bet_image(image_b64, "image/jpeg")
     except Exception:
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "⚠️ No pude leer la apuesta de la imagen. Probá con una captura más clara."
         )
 
@@ -648,14 +667,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📊 Cuota: {_format_money(cuota)}\n\n"
         "¿Confirmar registro? (Sí/No)"
     )
-    return await update.message.reply_text(summary)
+    return await _reply_text(update.message, summary)
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     state = USER_STATE.get(user.id)
     if not state:
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "Usa /newbet para iniciar una apuesta o /balance para ver tu saldo mensual."
         )
 
@@ -679,7 +698,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 match_name=bet.get("partido"),
             )
             USER_STATE.pop(user.id, None)
-            return await update.message.reply_text(
+            return await _reply_text(update.message, 
                 "✅ Apuesta registrada (pendiente)\n"
                 f"#{bet_id}\n"
                 f"Partido: {bet.get('partido', 'N/D')}\n"
@@ -690,15 +709,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         if answer in _NO_ANSWERS:
             USER_STATE.pop(user.id, None)
-            return await update.message.reply_text("❌ Registro cancelado.")
-        return await update.message.reply_text("Respondé Sí o No para confirmar el registro.")
+            return await _reply_text(update.message, "❌ Registro cancelado.")
+        return await _reply_text(update.message, "Respondé Sí o No para confirmar el registro.")
 
     # --- /apuesta flow: pick -> stake -> odds ---
     if state["step"] == "apuesta_pick":
         if not text:
-            return await update.message.reply_text("El pick no puede estar vacío. Describilo.")
+            return await _reply_text(update.message, "El pick no puede estar vacío. Describilo.")
         state.update({"pick": text, "step": "apuesta_stake"})
-        return await update.message.reply_text("¿Cuánto apostás? Escribí el monto (ej: 1000).")
+        return await _reply_text(update.message, "¿Cuánto apostás? Escribí el monto (ej: 1000).")
 
     if state["step"] == "apuesta_stake":
         try:
@@ -706,9 +725,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if stake <= 0:
                 raise ValueError
         except ValueError:
-            return await update.message.reply_text("Monto inválido. Enviá un número mayor a 0.")
+            return await _reply_text(update.message, "Monto inválido. Enviá un número mayor a 0.")
         state.update({"stake": stake, "step": "apuesta_odds"})
-        return await update.message.reply_text("¿A qué cuota? (ej: 1.85)")
+        return await _reply_text(update.message, "¿A qué cuota? (ej: 1.85)")
 
     if state["step"] == "apuesta_odds":
         try:
@@ -716,7 +735,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if odds <= 1:
                 raise ValueError
         except ValueError:
-            return await update.message.reply_text("Cuota inválida. Enviá un número mayor a 1 (ej: 1.85).")
+            return await _reply_text(update.message, "Cuota inválida. Enviá un número mayor a 1 (ej: 1.85).")
 
         bet_id = add_bet(
             telegram_user_id=user.id,
@@ -730,7 +749,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             fixture_id=state.get("fixture_id"),
         )
         USER_STATE.pop(user.id, None)
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "✅ Apuesta registrada (pendiente)\n"
             f"#{bet_id}\n"
             f"Partido: {state.get('match_name', 'N/D')}\n"
@@ -745,11 +764,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             index = int(text) - 1
             league = LEAGUES[index]
         except (ValueError, IndexError):
-            return await update.message.reply_text("Número de liga inválido. Intenta de nuevo.")
+            return await _reply_text(update.message, "Número de liga inválido. Intenta de nuevo.")
 
         state.update({"league": league, "step": "market"})
         markets_text = "\n".join(f"{i+1}. {market}" for i, market in enumerate(MARKETS))
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "Selecciona el mercado:\n" + markets_text + "\nEnvía el número del mercado."
         )
 
@@ -759,12 +778,12 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             index = int(text) - 1
             match = fixtures[index]
         except (ValueError, IndexError):
-            return await update.message.reply_text("Número de partido inválido. Intenta de nuevo.")
+            return await _reply_text(update.message, "Número de partido inválido. Intenta de nuevo.")
 
         date_str = state.get("date") or (match.get("utcDate") or "")[:10]
         league_key = state.get("league_key", ALL_LEAGUES_KEY)
         state["date"] = date_str  # ensure callbacks can re-resolve the match
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             match_options_text(match),
             reply_markup=build_contextual_match_action_buttons(date_str, league_key, match.get("id"), _is_live(match.get("status"))),
         )
@@ -772,13 +791,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if state["step"] == "picks_date_input":
         date_str = arg_to_date(text)
         if not date_str:
-            return await update.message.reply_text(
+            return await _reply_text(update.message, 
                 "Fecha inválida. Usa el formato YYYY-MM-DD."
             )
 
         USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
-        return await update.message.reply_text(
-            f"ElegÃ­ una liga para {date_str}:",
+        return await _reply_text(update.message, 
+            f"Elegí una liga para {date_str}:",
             reply_markup=build_league_buttons(date_str),
         )
 
@@ -787,16 +806,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             index = int(text) - 1
             market = MARKETS[index]
         except (ValueError, IndexError):
-            return await update.message.reply_text("Número de mercado inválido. Intenta de nuevo.")
+            return await _reply_text(update.message, "Número de mercado inválido. Intenta de nuevo.")
 
         state.update({"market": market, "step": "pick"})
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "Describe el pick (por ejemplo: 'Más de 3 corners', 'Menos de 2.5 goles')."
         )
 
     if state["step"] == "pick":
         state.update({"pick": text, "step": "stake"})
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "¿Cuánto apostaste? Escribe el monto en pesos o dólares."
         )
 
@@ -804,10 +823,10 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             stake = float(text)
         except ValueError:
-            return await update.message.reply_text("Monto inválido. Envía un número válido.")
+            return await _reply_text(update.message, "Monto inválido. Envía un número válido.")
 
         state.update({"stake": stake, "step": "odds"})
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "¿Cuál fue la cuota? Por ejemplo 1.85"
         )
 
@@ -815,7 +834,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             odds = float(text)
         except ValueError:
-            return await update.message.reply_text("Cuota inválida. Envía un número válido.")
+            return await _reply_text(update.message, "Cuota inválida. Envía un número válido.")
 
         state.update({"odds": odds})
         add_bet(
@@ -829,7 +848,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         USER_STATE.pop(user.id, None)
 
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "Apuesta registrada ✅\n"
             f"Liga: {state['league']}\n"
             f"Mercado: {state['market']}\n"
@@ -838,7 +857,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Cuota: {odds}"
         )
 
-    return await update.message.reply_text("Estado desconocido. Usa /newbet para iniciar nuevamente.")
+    return await _reply_text(update.message, "Estado desconocido. Usa /newbet para iniciar nuevamente.")
 
 
 async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -857,9 +876,9 @@ async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TY
         date_str = arg_to_date("hoy")
         fixtures = get_fixtures_for_date(date_str)
         if not fixtures:
-            return await query.edit_message_text(f"No hay partidos disponibles para hoy ({date_str}).")
+            return await _edit_message_text(query, f"No hay partidos disponibles para hoy ({date_str}).")
         USER_STATE[user.id] = {"step": "picks_select", "fixtures": fixtures, "date": date_str}
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             format_fixtures_text(fixtures, date_str),
             reply_markup=build_match_buttons(fixtures, date_str),
         )
@@ -868,16 +887,16 @@ async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TY
         date_str = arg_to_date("mañana")
         fixtures = get_fixtures_for_date(date_str)
         if not fixtures:
-            return await query.edit_message_text(f"No hay partidos disponibles para mañana ({date_str}).")
+            return await _edit_message_text(query, f"No hay partidos disponibles para mañana ({date_str}).")
         USER_STATE[user.id] = {"step": "picks_select", "fixtures": fixtures, "date": date_str}
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             format_fixtures_text(fixtures, date_str),
             reply_markup=build_match_buttons(fixtures, date_str),
         )
 
     if data == "picks_date":
         USER_STATE[user.id] = {"step": "picks_date_input"}
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             "Escribe la fecha en formato YYYY-MM-DD para ver los partidos de ese día."
         )
 
@@ -885,13 +904,13 @@ async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TY
         _, date_str, match_id = data.split("_", 2)
         match = _resolve_match(state, date_str, match_id)
         if not match:
-            return await query.edit_message_text(
+            return await _edit_message_text(query, 
                 "No pude encontrar ese partido. Intenta de nuevo desde el menú."
             )
         # Keep the state alive so the action buttons below can re-resolve the match.
         if state is not None:
             state["date"] = date_str
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             match_options_text(match),
             reply_markup=build_match_action_buttons(date_str, match_id, _is_live(match.get("status"))),
         )
@@ -900,11 +919,11 @@ async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TY
         _, date_str, match_id = data.split("_", 2)
         match = _resolve_match(state, date_str, match_id)
         if not match:
-            return await query.edit_message_text(
+            return await _edit_message_text(query, 
                 "No pude encontrar ese partido. Probá de nuevo desde el menú."
             )
 
-        await query.edit_message_text("⚙️ Analizando datos previos al partido...")
+        await _edit_message_text(query, "⚙️ Analizando datos previos al partido...")
         try:
             # Force pre-match treatment so the analysis uses only historical data,
             # even when the match is already live.
@@ -912,30 +931,30 @@ async def handle_picks_callback(update: Update, context: ContextTypes.DEFAULT_TY
             pre_match["status"] = "TIMED"
             picks_text = analyze_match(pre_match)
         except Exception:
-            return await query.edit_message_text("⚠️ No se pudo analizar este partido. Intentá de nuevo.")
+            return await _edit_message_text(query, "⚠️ No se pudo analizar este partido. Intentá de nuevo.")
 
-        return await query.edit_message_text(picks_text)
+        return await _edit_message_text(query, picks_text)
 
     if data and data.startswith("live_"):
         _, date_str, match_id = data.split("_", 2)
         match = _resolve_match(state, date_str, match_id)
         if not match:
-            return await query.edit_message_text(
+            return await _edit_message_text(query, 
                 "No pude encontrar ese partido. Probá de nuevo desde el menú."
             )
 
-        await query.edit_message_text("🔴 Trayendo estadísticas en vivo...")
+        await _edit_message_text(query, "🔴 Trayendo estadísticas en vivo...")
         try:
             live_text = format_live_stats(match)
         except Exception:
-            return await query.edit_message_text(
+            return await _edit_message_text(query, 
                 "⚠️ No se pudieron traer las stats en vivo. Intentá de nuevo."
             )
 
-        return await query.edit_message_text(live_text)
+        return await _edit_message_text(query, live_text)
 
     if data == "picks_menu":
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             "Selecciona una opción para ver partidos:",
             reply_markup=build_picks_keyboard(),
         )
@@ -955,38 +974,38 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
 
     if data == "picks_menu":
         USER_STATE[user.id] = {"step": "picks_menu"}
-        return await query.edit_message_text(
-            "Selecciona una opciÃ³n para ver partidos:",
+        return await _edit_message_text(query, 
+            "Selecciona una opción para ver partidos:",
             reply_markup=build_picks_keyboard(),
         )
 
     if data == "picks_today":
         date_str = arg_to_date("hoy")
         USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
-        return await query.edit_message_text(
-            f"ElegÃ­ una liga para hoy ({date_str}):",
+        return await _edit_message_text(query, 
+            f"Elegí una liga para hoy ({date_str}):",
             reply_markup=build_league_buttons(date_str),
         )
 
     if data == "picks_tomorrow":
-        date_str = arg_to_date("maÃ±ana")
+        date_str = arg_to_date("mañana")
         USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
-        return await query.edit_message_text(
-            f"ElegÃ­ una liga para maÃ±ana ({date_str}):",
+        return await _edit_message_text(query, 
+            f"Elegí una liga para mañana ({date_str}):",
             reply_markup=build_league_buttons(date_str),
         )
 
     if data == "picks_date":
         USER_STATE[user.id] = {"step": "picks_date_input"}
-        return await query.edit_message_text(
-            "Escribe la fecha en formato YYYY-MM-DD para ver los partidos de ese dÃ­a."
+        return await _edit_message_text(query, 
+            "Escribe la fecha en formato YYYY-MM-DD para ver los partidos de ese día."
         )
 
     if data.startswith("picks_leagues_"):
         date_str = data.replace("picks_leagues_", "", 1)
         USER_STATE[user.id] = {"step": "picks_league", "date": date_str}
-        return await query.edit_message_text(
-            f"ElegÃ­ una liga para {date_str}:",
+        return await _edit_message_text(query, 
+            f"Elegí una liga para {date_str}:",
             reply_markup=build_league_buttons(date_str),
         )
 
@@ -994,16 +1013,16 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         try:
             _, date_str, league_key = data.split("_", 2)
         except ValueError:
-            return await query.edit_message_text("No pude leer esa liga. ProbÃ¡ de nuevo desde /picks.")
+            return await _edit_message_text(query, "No pude leer esa liga. Probá de nuevo desde /picks.")
 
         try:
             fixtures = get_fixtures_for_date(date_str, league_key)
         except RuntimeError as exc:
             if _is_api_limit_error(exc):
-                return await query.edit_message_text(API_LIMIT_MESSAGE)
+                return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not fixtures:
-            return await query.edit_message_text(
+            return await _edit_message_text(query, 
                 f"No hay partidos disponibles para {league_label(league_key)} el {date_str}.",
                 reply_markup=build_league_buttons(date_str),
             )
@@ -1014,7 +1033,7 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
             "date": date_str,
             "league_key": league_key,
         }
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             format_fixtures_text(fixtures, date_str),
             reply_markup=build_match_buttons(fixtures, date_str, league_key),
         )
@@ -1023,22 +1042,22 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         try:
             _, date_str, league_key, match_id = data.split("_", 3)
         except ValueError:
-            return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
+            return await _edit_message_text(query, "No pude leer ese partido. Probá de nuevo desde /picks.")
 
         try:
             match = _resolve_match(state, date_str, league_key, match_id)
         except RuntimeError as exc:
             if _is_api_limit_error(exc):
-                return await query.edit_message_text(API_LIMIT_MESSAGE)
+                return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not match:
-            return await query.edit_message_text(
-                "No pude encontrar ese partido. Intenta de nuevo desde el menÃº."
+            return await _edit_message_text(query, 
+                "No pude encontrar ese partido. Intenta de nuevo desde el menú."
             )
         if state is not None:
             state["date"] = date_str
             state["league_key"] = league_key
-        return await query.edit_message_text(
+        return await _edit_message_text(query, 
             match_options_text(match),
             reply_markup=build_contextual_match_action_buttons(date_str, league_key, match_id, _is_live(match.get("status"))),
         )
@@ -1047,55 +1066,55 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         try:
             _, date_str, league_key, match_id = data.split("_", 3)
         except ValueError:
-            return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
+            return await _edit_message_text(query, "No pude leer ese partido. Probá de nuevo desde /picks.")
 
         try:
             match = _resolve_match(state, date_str, league_key, match_id)
         except RuntimeError as exc:
             if _is_api_limit_error(exc):
-                return await query.edit_message_text(API_LIMIT_MESSAGE)
+                return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not match:
-            return await query.edit_message_text(
-                "No pude encontrar ese partido. ProbÃ¡ de nuevo desde el menÃº."
+            return await _edit_message_text(query, 
+                "No pude encontrar ese partido. Probá de nuevo desde el menú."
             )
 
-        await query.edit_message_text("âš™ï¸ Analizando datos previos al partido...")
+        await _edit_message_text(query, "⚙️ Analizando datos previos al partido...")
         try:
             pre_match = dict(match)
             pre_match["status"] = "TIMED"
             picks_text = analyze_match(pre_match)
         except Exception:
-            return await query.edit_message_text("âš ï¸ No se pudo analizar este partido. IntentÃ¡ de nuevo.")
+            return await _edit_message_text(query, "⚠️ No se pudo analizar este partido. Intentá de nuevo.")
 
-        return await query.edit_message_text(picks_text)
+        return await _edit_message_text(query, picks_text)
 
     if data.startswith("live_"):
         try:
             _, date_str, league_key, match_id = data.split("_", 3)
         except ValueError:
-            return await query.edit_message_text("No pude leer ese partido. ProbÃ¡ de nuevo desde /picks.")
+            return await _edit_message_text(query, "No pude leer ese partido. Probá de nuevo desde /picks.")
 
         try:
             match = _resolve_match(state, date_str, league_key, match_id)
         except RuntimeError as exc:
             if _is_api_limit_error(exc):
-                return await query.edit_message_text(API_LIMIT_MESSAGE)
+                return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not match:
-            return await query.edit_message_text(
-                "No pude encontrar ese partido. ProbÃ¡ de nuevo desde el menÃº."
+            return await _edit_message_text(query, 
+                "No pude encontrar ese partido. Probá de nuevo desde el menú."
             )
 
-        await query.edit_message_text("ðŸ”´ Trayendo estadÃ­sticas en vivo...")
+        await _edit_message_text(query, "🔴 Trayendo estadísticas en vivo...")
         try:
             live_text = format_live_stats(match)
         except Exception:
-            return await query.edit_message_text(
-                "âš ï¸ No se pudieron traer las stats en vivo. IntentÃ¡ de nuevo."
+            return await _edit_message_text(query, 
+                "⚠️ No se pudieron traer las stats en vivo. Intentá de nuevo."
             )
 
-        return await query.edit_message_text(live_text)
+        return await _edit_message_text(query, live_text)
 
 
 async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1103,7 +1122,7 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
     stats = get_stats(user.id)
 
     if stats["won"] == 0 and stats["lost"] == 0 and stats["pending"] == 0:
-        return await update.message.reply_text(
+        return await _reply_text(update.message, 
             "Todavía no registraste apuestas. Usá /apuesta para empezar."
         )
 
@@ -1137,4 +1156,4 @@ async def balance(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Mejor pick: {best_txt}\n"
         f"Racha actual: {racha_txt}"
     )
-    await update.message.reply_text(text)
+    await _reply_text(update.message, text)
