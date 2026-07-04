@@ -492,7 +492,12 @@ def format_match_prompt(match: dict) -> str:
         "💰 Confianza global: X%\n\n"
         "REGLAS:\n"
         "- DATA CLAVE: completá cada línea con los números reales provistos abajo. Si un dato no está, poné 'N/D'.\n"
-        "- Si el partido NO empezó (pre-partido), no hay datos del propio partido: en DATA CLAVE usá los LÍDERES POR EQUIPO provistos abajo (torneo o temporada de club según indique el dato). Para los PICKS DE JUGADORES seguí SIEMPRE la regla de ALINEACIÓN: solo si está confirmada y solo con líderes marcados ✅ TITULAR.\n"
+        "- Si el partido NO empezó (pre-partido), no hay datos del propio partido: en DATA CLAVE usá primero los LÍDERES POR EQUIPO del bloque DATOS DEL TORNEO ACTUAL. Si no existe dato del torneo para una categoría, podés mencionar club como referencia, pero NO convertirlo en pick específico. Para los PICKS DE JUGADORES seguí SIEMPRE la regla de ALINEACIÓN: solo si está confirmada y solo con líderes marcados ✅ TITULAR.\n"
+        "- JERARQUÍA DE DATOS PARA JUGADORES: DATOS DEL TORNEO ACTUAL (Mundial 2026) tienen prioridad máxima. DATOS DE CLUB son contexto secundario y solo referencia.\n"
+        "- NUNCA hagas picks de jugadores basados solo en datos de club si ese jugador o categoría tiene datos del Mundial 2026.\n"
+        "- Si un jugador tiene datos del torneo actual, usá SOLO esos datos del Mundial para calcular picks y líneas. Ignorá su temporada de club para picks específicos.\n"
+        "- Los datos de club sirven solo para contexto general del perfil del jugador, no para proponer líneas concretas de remates, faltas, tarjetas o atajadas.\n"
+        "- Ajustá las líneas al contexto del torneo: en Mundial/fase eliminatoria las líneas deben ser más conservadoras que en temporada de club (menos goles, menos corners, menos faltas y ritmo más cerrado).\n"
         "- CUOTAS: usá SOLO las cuotas reales del bloque CUOTAS REALES. Si una cuota real no está disponible para un mercado, no uses ese mercado para PICK SEGURO, VALUE BET ni SOÑADA.\n"
         "- VALUE BET: calculá probabilidad implícita = 1/cuota. Si tu probabilidad estimada supera la implícita, marcá 💎 VALUE BET. Ejemplo: 65% estimado vs cuota 2.00 (50% implícita) = edge +15 pp.\n"
         "- 🛡️ PICK SEGURO: elegí el pick con mayor confianza siempre que sea >80%; si ninguno supera 80%, escribí 'Sin pick seguro >80%'.\n"
@@ -518,6 +523,7 @@ def format_match_prompt(match: dict) -> str:
         "- Cuota estimada: un número plausible (ej. @1.85, @2.10). La razón: máximo una línea corta.\n"
         "- NO escribas justificaciones largas, introducciones ni conclusiones. Solo el bloque pedido.\n\n"
         "=== DATOS REALES ===\n"
+        "CONTEXTO: Este es un partido de fase eliminatoria del Mundial 2026. Los partidos de esta fase son más cerrados, con menos goles y menos faltas que la fase de grupos.\n"
         f"Partido: {home_name} (id {home_id}) vs {away_name} (id {away_id})\n"
         f"Competición: {competition} | Fase: {stage} - {group} - Jornada {matchday} | Estado: {status}\n\n"
         f"Estadísticas {home_name}:\n{home_stats_text}\n"
@@ -577,6 +583,18 @@ def _flatten_players(teams: dict) -> list:
     return flat
 
 
+def _data_source_label(entry: dict) -> str:
+    if not entry:
+        return ""
+    source = entry.get("source") or "torneo"
+    if source == "temporada de club":
+        return "(temporada de club, referencia)"
+    appearances = entry.get("appearances")
+    if appearances:
+        return f"(Mundial 2026, {appearances} partidos)"
+    return "(Mundial 2026)"
+
+
 def _format_prematch_profiles(profiles: dict, xi_tokens: set, confirmed: bool) -> str:
     """Pre-match player block: leaders for each team (top shooter, top scorer,
     top assistant, most fouls committed, most fouls drawn, most yellow cards).
@@ -596,23 +614,35 @@ def _format_prematch_profiles(profiles: dict, xi_tokens: set, confirmed: bool) -
         if not entry or not entry.get("name"):
             return "N/D"
         tag = _xi_tag(entry.get("name"), xi_tokens, confirmed)
-        source = entry.get("source") or "torneo"
-        return f"{entry['name']} ({entry.get('value', 0)} {unit}) ({source}){tag}"
+        source = _data_source_label(entry)
+        return f"{entry['name']} ({entry.get('value', 0)} {unit}) {source}{tag}"
 
     def _fmt_shooter(entry):
         if not entry or not entry.get("name"):
             return "N/D"
         tag = _xi_tag(entry.get("name"), xi_tokens, confirmed)
-        source = entry.get("source") or "torneo"
+        source = _data_source_label(entry)
         on_target = entry.get("shots_on_target", 0)
         return (
             f"{entry['name']} ({entry.get('value', 0)} remates, "
-            f"{on_target} al arco) ({source}){tag}"
+            f"{on_target} al arco) {source}{tag}"
         )
+
+    def _has_reference_data(reference: dict) -> bool:
+        return any(reference.get(k) for k in (
+            "top_shooter",
+            "top_scorer",
+            "top_assist",
+            "top_fouls",
+            "top_fouls_drawn",
+            "top_cards",
+            "top_keeper",
+        ))
 
     absent_keys = []  # key attacking players (scorer/assist) on the bench
     for team, prof in profiles.items():
         lines.append(f"\n🎯 {team}:")
+        lines.append("  DATOS DEL TORNEO ACTUAL (prioridad máxima):")
         lines.append(f"  - Top rematador: {_fmt_shooter(prof.get('top_shooter'))}")
         lines.append(f"  - Top goleador: {_fmt(prof.get('top_scorer'), 'goles')}")
         lines.append(f"  - Top asistidor: {_fmt(prof.get('top_assist'), 'asist.')}")
@@ -621,6 +651,20 @@ def _format_prematch_profiles(profiles: dict, xi_tokens: set, confirmed: bool) -
         lines.append(f"  - Más tarjetas: {_fmt(prof.get('top_cards'), 'amarillas')}")
         if prof.get("top_keeper"):
             lines.append(f"  - Arquero (más atajadas): {_fmt(prof.get('top_keeper'), 'atajadas')}")
+
+        club_reference = prof.get("club_reference") or {}
+        lines.append("  DATOS DE CLUB (contexto secundario, solo referencia):")
+        if _has_reference_data(club_reference):
+            lines.append(f"  - Top rematador: {_fmt_shooter(club_reference.get('top_shooter'))}")
+            lines.append(f"  - Top goleador: {_fmt(club_reference.get('top_scorer'), 'goles')}")
+            lines.append(f"  - Top asistidor: {_fmt(club_reference.get('top_assist'), 'asist.')}")
+            lines.append(f"  - Más faltas cometidas: {_fmt(club_reference.get('top_fouls'), 'faltas')}")
+            lines.append(f"  - Más faltas recibidas: {_fmt(club_reference.get('top_fouls_drawn'), 'faltas')}")
+            lines.append(f"  - Más tarjetas: {_fmt(club_reference.get('top_cards'), 'amarillas')}")
+            if club_reference.get("top_keeper"):
+                lines.append(f"  - Arquero (más atajadas): {_fmt(club_reference.get('top_keeper'), 'atajadas')}")
+        else:
+            lines.append("  - Sin datos de club disponibles.")
 
         if confirmed:
             for role in ("top_scorer", "top_assist"):

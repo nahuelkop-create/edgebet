@@ -220,6 +220,7 @@ def _prematch_player_stats(
             "top_fouls": _team_leader(fouls, tid),
             "top_fouls_drawn": None,
             "top_cards": _team_leader(yellow, tid),
+            "club_reference": {},
         }
         # The global /players/top* lists only cover the tournament-wide top ~20,
         # so many squads are absent. Fill any gaps with this team's own leaders.
@@ -231,6 +232,7 @@ def _prematch_player_stats(
                 if profile[k] is None:
                     profile[k] = squad.get(k)
             profile["top_keeper"] = squad.get("top_keeper")
+            profile["club_reference"] = squad.get("club_reference", {})
         profiles[tname] = profile
 
     return {"mode": "pre_match", "profiles": profiles}
@@ -348,6 +350,8 @@ def _tournament_leaders(path: str, value_getter, league_id: int, season: int) ->
                 "team": team.get("name", "Unknown"),
                 "team_id": team.get("id"),
                 "value": int(value),
+                "source": "torneo",
+                "appearances": _int_stat((stat.get("games") or {}).get("appearences")),
                 # Fouls committed are carried in every /players/top* stat block,
                 # so we piggyback them to derive a fouls leaderboard below.
                 "fouls": int((stat.get("fouls") or {}).get("committed") or 0),
@@ -373,6 +377,8 @@ def _merge_foul_leaders(*leader_lists: List[Dict[str, Any]]) -> List[Dict[str, A
                     "team": l.get("team"),
                     "team_id": l.get("team_id"),
                     "value": fouls,
+                    "source": l.get("source", "torneo"),
+                    "appearances": l.get("appearances", 0),
                 }
     return sorted(seen.values(), key=lambda x: x.get("value", 0), reverse=True)
 
@@ -420,6 +426,7 @@ def _top_player(players: List[Dict[str, Any]], value_getter) -> Optional[Dict[st
                 "value": int(val),
                 "source": p.get("source", "torneo"),
                 "source_team": p.get("source_team"),
+                "appearances": p.get("appearances", 0),
             }
             if "shots_on_target" in p:
                 best["shots_on_target"] = int(p.get("shots_on_target") or 0)
@@ -520,11 +527,17 @@ def get_team_player_leaders(
     league_id: int = WORLD_CUP_LEAGUE_ID,
     season: int = 2026,
     max_pages: int = 5,
+    club_reference_limit: int = 18,
 ) -> Dict[str, Any]:
-    """A single team's leaders, preferring the tournament but falling back to a
-    player's 2025 club season when the World Cup sample is too small.
+    """A single team's leaders split by source.
+
+    Tournament stats stay as the primary data even when the sample is small.
+    Club-season stats are returned separately as reference context so they never
+    replace World Cup numbers in player-pick logic.
     """
-    players: List[Dict[str, Any]] = []
+    tournament_players: List[Dict[str, Any]] = []
+    club_players: List[Dict[str, Any]] = []
+    club_reference_player_ids: List[int] = []
     try:
         page = 1
         total_pages = 1
@@ -537,23 +550,41 @@ def get_team_player_leaders(
             for item in data.get("response", []):
                 stat = (item.get("statistics") or [{}])[0]
                 record = _player_record_from_stat(item, stat, team_id, source="torneo")
-                if record.get("appearances", 0) < 2 and record.get("player_id"):
-                    club_record = _club_season_player_record(record["player_id"], team_id)
-                    if club_record:
-                        record = club_record
-                players.append(record)
+                tournament_players.append(record)
+                if record.get("player_id"):
+                    club_reference_player_ids.append(record["player_id"])
             page += 1
     except Exception:
         pass
 
+    tournament_leaders = {
+        "top_shooter": _top_player(tournament_players, lambda p: p.get("shots")),
+        "top_scorer": _top_player(tournament_players, lambda p: p.get("goals")),
+        "top_assist": _top_player(tournament_players, lambda p: p.get("assists")),
+        "top_fouls": _top_player(tournament_players, lambda p: p.get("fouls")),
+        "top_fouls_drawn": _top_player(tournament_players, lambda p: p.get("fouls_drawn")),
+        "top_cards": _top_player(tournament_players, lambda p: p.get("yellow")),
+        "top_keeper": _top_player(tournament_players, lambda p: p.get("saves")),
+    }
+
+    if any(value is None for value in tournament_leaders.values()):
+        for player_id in club_reference_player_ids[:club_reference_limit]:
+            club_record = _club_season_player_record(player_id, team_id)
+            if club_record:
+                club_players.append(club_record)
+
+    club_reference = {
+        "top_shooter": _top_player(club_players, lambda p: p.get("shots")),
+        "top_scorer": _top_player(club_players, lambda p: p.get("goals")),
+        "top_assist": _top_player(club_players, lambda p: p.get("assists")),
+        "top_fouls": _top_player(club_players, lambda p: p.get("fouls")),
+        "top_fouls_drawn": _top_player(club_players, lambda p: p.get("fouls_drawn")),
+        "top_cards": _top_player(club_players, lambda p: p.get("yellow")),
+        "top_keeper": _top_player(club_players, lambda p: p.get("saves")),
+    }
+    tournament_leaders["club_reference"] = club_reference
     return {
-        "top_shooter": _top_player(players, lambda p: p.get("shots")),
-        "top_scorer": _top_player(players, lambda p: p.get("goals")),
-        "top_assist": _top_player(players, lambda p: p.get("assists")),
-        "top_fouls": _top_player(players, lambda p: p.get("fouls")),
-        "top_fouls_drawn": _top_player(players, lambda p: p.get("fouls_drawn")),
-        "top_cards": _top_player(players, lambda p: p.get("yellow")),
-        "top_keeper": _top_player(players, lambda p: p.get("saves")),
+        **tournament_leaders,
     }
 
 
