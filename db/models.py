@@ -113,6 +113,9 @@ class Prediction(Base):
     expected_value: Mapped[float | None] = mapped_column(Float)
     confidence: Mapped[float | None] = mapped_column(Float)
     recommended: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    correct: Mapped[bool | None] = mapped_column(Boolean)
+    profit: Mapped[float | None] = mapped_column(Float)
+    settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 # NOTE: bets are stored exclusively in SQLite (services/database.py). There is no

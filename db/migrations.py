@@ -24,6 +24,10 @@ def _apply_incremental_migrations(engine) -> None:
                 "ADD COLUMN IF NOT EXISTS total_picks INTEGER"
             )
         )
+        # Prediction settlement fields populated once final stats are collected.
+        conn.execute(text("ALTER TABLE predictions ADD COLUMN IF NOT EXISTS correct BOOLEAN"))
+        conn.execute(text("ALTER TABLE predictions ADD COLUMN IF NOT EXISTS profit DOUBLE PRECISION"))
+        conn.execute(text("ALTER TABLE predictions ADD COLUMN IF NOT EXISTS settled_at TIMESTAMP WITH TIME ZONE"))
         # Drop pre-existing duplicate predictions (keep the latest row per
         # fixture+market) before enforcing uniqueness, otherwise the index
         # creation would fail on legacy data.

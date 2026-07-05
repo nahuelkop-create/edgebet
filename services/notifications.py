@@ -29,7 +29,7 @@ from dotenv import load_dotenv
 from collectors.fixtures_collector import collect_upcoming_fixtures
 from collectors.odds_collector import collect_odds
 from collectors.stats_collector import collect_finished_match_stats
-from models.corners_model import evaluate_model
+from models.corners_model import retrain_if_needed
 from services.anthropic_client import analyze_match
 from services.football_data import (
     _get,
@@ -59,7 +59,7 @@ RESULTS_INTERVAL = 30 * 60              # scheduler: results check every 30 min
 FIXTURES_COLLECTOR_INTERVAL = 6 * 60 * 60  # scheduler: upcoming fixtures every 6h
 STATS_COLLECTOR_INTERVAL = 2 * 60 * 60     # scheduler: finished match stats every 2h
 ODDS_COLLECTOR_INTERVAL = 2 * 60 * 60      # scheduler: odds snapshots every 2h
-MODEL_EVALUATION_INTERVAL = 24 * 60 * 60   # scheduler: model backtest every 24h
+MODEL_RETRAIN_INTERVAL = 7 * 24 * 60 * 60   # scheduler: model retrain every week
 
 
 # --------------------------------------------------------------------------- #
@@ -628,20 +628,21 @@ def check_result_notifications() -> int:
     return resolved_count
 
 
-def evaluate_corners_model_job() -> int:
-    result = evaluate_model()
-    if not result.get("available"):
-        logging.info("[model-corners] evaluaciÃ³n no disponible: %s", result.get("error"))
+def retrain_corners_model_job() -> int:
+    result = retrain_if_needed()
+    if not result.get("retrained"):
+        logging.info("[model-corners] reentrenamiento omitido: %s", result.get("reason"))
         return 0
 
+    metrics = result.get("metrics") or {}
     logging.info(
-        "[model-corners] hit_rate=%s roi=%s total_picks=%s test_size=%s",
-        result.get("hit_rate"),
-        result.get("roi"),
-        result.get("total_picks"),
-        result.get("test_size"),
+        "[model-corners] reentrenado: hit_rate=%s roi=%s total_picks=%s filas=%s",
+        metrics.get("hit_rate"),
+        metrics.get("roi"),
+        metrics.get("total_picks"),
+        result.get("row_count"),
     )
-    return int(result.get("total_picks") or 0)
+    return int(result.get("new_matches") or 0)
 
 
 # --------------------------------------------------------------------------- #
@@ -661,6 +662,15 @@ def _run_loop(job, interval: int, first_delay: int, label: str):
         except Exception:
             logging.exception("[%s] error en el job de notificaciones", label)
         time.sleep(interval)
+
+
+def _seconds_until_next_sunday_0300_utc() -> int:
+    now = datetime.now(timezone.utc)
+    days_until_sunday = (6 - now.weekday()) % 7
+    target = now.replace(hour=3, minute=0, second=0, microsecond=0) + timedelta(days=days_until_sunday)
+    if target <= now:
+        target += timedelta(days=7)
+    return max(1, int((target - now).total_seconds()))
 
 
 def start_schedulers():
@@ -692,18 +702,22 @@ def start_schedulers():
     ).start()
     threading.Thread(
         target=_run_loop,
-        args=(evaluate_corners_model_job, MODEL_EVALUATION_INTERVAL, 180, "model-corners"),
+        args=(
+            retrain_corners_model_job,
+            MODEL_RETRAIN_INTERVAL,
+            _seconds_until_next_sunday_0300_utc(),
+            "model-corners",
+        ),
         daemon=True,
     ).start()
     logging.info(
         (
             "Schedulers iniciados: pre-partido cada %smin, resultados cada %smin, "
-            "fixtures cada %smin, stats cada %smin, odds cada %smin, modelo cada %sh."
+            "fixtures cada %smin, stats cada %smin, odds cada %smin, modelo domingos 03:00 UTC."
         ),
         PRE_MATCH_INTERVAL // 60,
         RESULTS_INTERVAL // 60,
         FIXTURES_COLLECTOR_INTERVAL // 60,
         STATS_COLLECTOR_INTERVAL // 60,
         ODDS_COLLECTOR_INTERVAL // 60,
-        MODEL_EVALUATION_INTERVAL // 3600,
     )

@@ -1,9 +1,11 @@
 import logging
+import os
 import threading
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.connection import get_session
@@ -14,8 +16,10 @@ MODEL_NAME = "corners_logistic_regression_v1"
 MARKET = "corners_over_9_5"
 CORNER_LINE = 9.5
 MIN_TRAINING_ROWS = 20
+MIN_NEW_MATCHES_FOR_RETRAIN = 50
 TEST_FRACTION = 0.2  # last 20% of fixtures (chronological) used for evaluation
 MODEL_CACHE_TTL = timedelta(hours=24)
+MODEL_PATH = Path(os.getenv("CORNERS_MODEL_PATH", "/data/corners_model.pkl"))
 
 # In-memory cache for the trained production model so predict() does not retrain
 # the whole logistic regression on every call. Guarded by a lock because
@@ -36,6 +40,40 @@ FEATURE_COLUMNS = [
     "away_shots_avg_5",
     "home_is_home",
 ]
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _load_model_bundle() -> dict[str, Any] | None:
+    if not MODEL_PATH.exists():
+        return None
+    try:
+        joblib = __import__("joblib")
+        bundle = joblib.load(MODEL_PATH)
+        if not bundle.get("model") or not bundle.get("feature_columns"):
+            logging.warning("[corners_model] modelo en disco invÃ¡lido: %s", MODEL_PATH)
+            return None
+        return bundle
+    except Exception:
+        logging.exception("[corners_model] no se pudo cargar el modelo desde %s", MODEL_PATH)
+        return None
+
+
+def _save_model_bundle(bundle: dict[str, Any]) -> None:
+    joblib = __import__("joblib")
+    MODEL_PATH.parent.mkdir(parents=True, exist_ok=True)
+    joblib.dump(bundle, MODEL_PATH)
+
+
+def _cache_model_bundle(bundle: dict[str, Any]) -> None:
+    _MODEL_CACHE.update({
+        "model": bundle["model"],
+        "feature_columns": list(bundle["feature_columns"]),
+        "trained_at": bundle.get("trained_at") or _utcnow(),
+        "row_count": int(bundle.get("row_count") or 0),
+    })
 
 
 def _avg(values: list[float]) -> float | None:
@@ -213,37 +251,13 @@ def train_model():
     dataset = build_dataset()
     trained = _fit_model(dataset)
     trained["dataset"] = dataset
+    trained["trained_at"] = _utcnow()
+    trained["row_count"] = len(dataset)
     return trained
-    if dataset.empty or len(dataset) < MIN_TRAINING_ROWS:
-        return {
-            "model": None,
-            "dataset": dataset,
-            "feature_columns": [],
-            "error": f"histórico insuficiente ({len(dataset)} filas)",
-        }
-    if dataset["target_over_9_5"].nunique() < 2:
-        return {
-            "model": None,
-            "dataset": dataset,
-            "feature_columns": [],
-            "error": "histórico con una sola clase para corners",
-        }
-
-    matrix, feature_cols = _prepare_matrix(dataset)
-    X = matrix[feature_cols].fillna(0)
-    y = matrix["target_over_9_5"]
-    model = Pipeline(
-        steps=[
-            ("scaler", StandardScaler()),
-            ("logreg", LogisticRegression(max_iter=1000, random_state=42)),
-        ]
-    )
-    model.fit(X, y)
-    return {"model": model, "dataset": dataset, "feature_columns": feature_cols, "error": None}
 
 
 def _get_cached_trained_model() -> dict[str, Any]:
-    now = datetime.utcnow()
+    now = _utcnow()
     with _MODEL_CACHE_LOCK:
         trained_at = _MODEL_CACHE.get("trained_at")
         if _MODEL_CACHE.get("model") is not None and trained_at and now - trained_at < MODEL_CACHE_TTL:
@@ -253,14 +267,30 @@ def _get_cached_trained_model() -> dict[str, Any]:
                 "error": None,
             }
 
+        bundle = _load_model_bundle()
+        if bundle is not None:
+            _cache_model_bundle(bundle)
+            return {
+                "model": bundle["model"],
+                "feature_columns": list(bundle["feature_columns"]),
+                "error": None,
+            }
+
         trained = train_model()
         if not trained.get("error"):
-            _MODEL_CACHE.update({
+            bundle = {
                 "model": trained["model"],
                 "feature_columns": list(trained["feature_columns"]),
-                "trained_at": now,
-                "row_count": len(trained.get("dataset", [])),
-            })
+                "trained_at": trained["trained_at"],
+                "row_count": trained["row_count"],
+                "model_name": MODEL_NAME,
+                "market": MARKET,
+            }
+            try:
+                _save_model_bundle(bundle)
+            except Exception:
+                logging.exception("[corners_model] no se pudo guardar el modelo inicial en %s", MODEL_PATH)
+            _cache_model_bundle(bundle)
         return trained
 
 
@@ -400,12 +430,6 @@ def evaluate_model() -> dict[str, Any]:
                     hits += 1 if actual == 0 else 0
             hit_rate = round(float(hits / total_picks), 4) if total_picks else 0.0
             roi = round(profit / total_picks, 4) if total_picks else 0.0
-            session.execute(
-                delete(ModelPerformance).where(
-                    ModelPerformance.model_name == MODEL_NAME,
-                    ModelPerformance.market == MARKET,
-                )
-            )
             session.add(
                 ModelPerformance(
                     model_name=MODEL_NAME,
@@ -414,7 +438,7 @@ def evaluate_model() -> dict[str, Any]:
                     roi=roi,
                     sample_size=int(len(test_dataset)),
                     total_picks=total_picks,
-                    last_updated=datetime.utcnow(),
+                    last_updated=_utcnow(),
                 )
             )
             session.commit()
@@ -433,4 +457,117 @@ def evaluate_model() -> dict[str, Any]:
         "train_size": int(len(train_dataset)),
         "test_size": int(len(test_dataset)),
         "total_picks": total_picks,
+    }
+
+
+def _latest_performance(session) -> ModelPerformance | None:
+    return session.scalar(
+        select(ModelPerformance)
+        .where(
+            ModelPerformance.model_name == MODEL_NAME,
+            ModelPerformance.market == MARKET,
+        )
+        .order_by(ModelPerformance.last_updated.desc())
+        .limit(1)
+    )
+
+
+def retrain_if_needed(now: datetime | None = None) -> dict[str, Any]:
+    """Weekly retraining entrypoint, intended for Sundays at 03:00 UTC."""
+    now = now or _utcnow()
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
+    now = now.astimezone(timezone.utc)
+    if now.weekday() != 6 or now.hour != 3:
+        return {
+            "retrained": False,
+            "reason": "fuera de ventana semanal domingo 03:00 UTC",
+        }
+
+    dataset = build_dataset()
+    row_count = len(dataset)
+    previous_bundle = _load_model_bundle()
+    previous_row_count = int(previous_bundle.get("row_count") or 0) if previous_bundle else 0
+    new_matches = row_count - previous_row_count
+    if new_matches < MIN_NEW_MATCHES_FOR_RETRAIN:
+        logging.info(
+            "[corners_model] reentrenamiento omitido: %s partidos nuevos desde el Ãºltimo entrenamiento (mÃ­nimo %s)",
+            new_matches,
+            MIN_NEW_MATCHES_FOR_RETRAIN,
+        )
+        return {
+            "retrained": False,
+            "reason": "partidos nuevos insuficientes",
+            "new_matches": new_matches,
+            "row_count": row_count,
+        }
+
+    trained = _fit_model(dataset)
+    if trained.get("error"):
+        logging.info("[corners_model] reentrenamiento no disponible: %s", trained["error"])
+        return {
+            "retrained": False,
+            "reason": trained["error"],
+            "new_matches": new_matches,
+            "row_count": row_count,
+        }
+
+    bundle = {
+        "model": trained["model"],
+        "feature_columns": list(trained["feature_columns"]),
+        "trained_at": now,
+        "row_count": row_count,
+        "model_name": MODEL_NAME,
+        "market": MARKET,
+    }
+    _save_model_bundle(bundle)
+    with _MODEL_CACHE_LOCK:
+        _cache_model_bundle(bundle)
+
+    previous_metrics = None
+    try:
+        session = get_session()
+    except RuntimeError:
+        session = None
+    if session is not None:
+        with session:
+            previous = _latest_performance(session)
+            if previous:
+                previous_metrics = {
+                    "hit_rate": previous.hit_rate,
+                    "roi": previous.roi,
+                    "total_picks": previous.total_picks,
+                    "last_updated": previous.last_updated,
+                }
+
+    metrics = evaluate_model()
+    if metrics.get("available"):
+        logging.info(
+            (
+                "[corners_model] reentrenado %s filas (+%s), guardado en %s. "
+                "Nuevo: hit_rate=%s roi=%s total_picks=%s. Anterior: %s"
+            ),
+            row_count,
+            new_matches,
+            MODEL_PATH,
+            metrics.get("hit_rate"),
+            metrics.get("roi"),
+            metrics.get("total_picks"),
+            previous_metrics or "sin mÃ©tricas previas",
+        )
+    else:
+        logging.info(
+            "[corners_model] reentrenado %s filas (+%s), pero la evaluaciÃ³n no estÃ¡ disponible: %s",
+            row_count,
+            new_matches,
+            metrics.get("error"),
+        )
+
+    return {
+        "retrained": True,
+        "model_path": str(MODEL_PATH),
+        "new_matches": new_matches,
+        "row_count": row_count,
+        "metrics": metrics,
+        "previous_metrics": previous_metrics,
     }

@@ -5,12 +5,13 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from db.connection import get_session
-from db.models import Fixture, Player, PlayerStat, Team, TeamStat
+from db.models import Fixture, Player, PlayerStat, Prediction, Team, TeamStat
 from collectors.fixtures_collector import LEAGUES_TO_COLLECT, _upsert_fixture
 from services.football_data import _get
 
 
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
+CORNER_LINE = 9.5
 
 
 def _to_int(value) -> int | None:
@@ -113,6 +114,39 @@ def _store_player_stats(session, fixture_id: int) -> int:
     return saved
 
 
+def _settle_prediction(prediction: Prediction, total_corners: int) -> bool:
+    market = (prediction.market or "").lower()
+    if "corners_over_9_5" in market or market in {"corners_9_5", "corners", "corners_total_9_5"}:
+        correct = total_corners > CORNER_LINE
+    elif "corners_under_9_5" in market:
+        correct = total_corners < CORNER_LINE
+    else:
+        return False
+
+    odds = prediction.real_odds
+    prediction.correct = bool(correct)
+    prediction.profit = round(float(odds) - 1.0, 4) if correct and odds else (-1.0 if not correct else None)
+    prediction.settled_at = datetime.now(timezone.utc)
+    return True
+
+
+def _settle_predictions(session, fixture_id: int) -> int:
+    stats = list(session.scalars(select(TeamStat).where(TeamStat.fixture_id == fixture_id)).all())
+    corners = [stat.corners for stat in stats if stat.corners is not None]
+    if len(corners) < 2:
+        return 0
+
+    total_corners = sum(int(value) for value in corners)
+    predictions = session.scalars(
+        select(Prediction).where(Prediction.fixture_id == fixture_id)
+    ).all()
+    settled = 0
+    for prediction in predictions:
+        if _settle_prediction(prediction, total_corners):
+            settled += 1
+    return settled
+
+
 def collect_match_stats(fixture_id: int) -> dict[str, int]:
     """Persist team and player stats for one finished fixture."""
     try:
@@ -126,15 +160,17 @@ def collect_match_stats(fixture_id: int) -> dict[str, int]:
         session.execute(delete(PlayerStat).where(PlayerStat.fixture_id == fixture_id))
         team_count = _store_team_stats(session, fixture_id)
         player_count = _store_player_stats(session, fixture_id)
+        settled_count = _settle_predictions(session, fixture_id)
         session.commit()
 
     logging.info(
-        "[stats_collector] fixture %s: team_stats=%s player_stats=%s",
+        "[stats_collector] fixture %s: team_stats=%s player_stats=%s predictions_settled=%s",
         fixture_id,
         team_count,
         player_count,
+        settled_count,
     )
-    return {"team_stats": team_count, "player_stats": player_count}
+    return {"team_stats": team_count, "player_stats": player_count, "predictions_settled": settled_count}
 
 
 def collect_finished_match_stats() -> int:
