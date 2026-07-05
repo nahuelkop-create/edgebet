@@ -142,6 +142,7 @@
     }
 
     .table-panel { overflow: hidden; }
+    .stack { display: grid; gap: 16px; margin-bottom: 16px; }
 
     .table-head {
       display: flex;
@@ -180,6 +181,18 @@
     td.pick { max-width: 320px; line-height: 1.35; }
     td.numeric { font-variant-numeric: tabular-nums; white-space: nowrap; }
     .result { font-size: 18px; }
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: var(--panel-soft);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
     .empty { padding: 28px 18px; color: var(--muted); }
 
     @media (max-width: 900px) {
@@ -254,6 +267,143 @@
           </div>
           {% endfor %}
         </div>
+      </article>
+    </section>
+
+    <section class="stack">
+      <article class="panel table-panel">
+        <div class="table-head">
+          <h2>Performance de modelos</h2>
+          <p class="muted">Predicciones cerradas en PostgreSQL</p>
+        </div>
+        {% if model_performance %}
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Modelo</th>
+                <th>Hit rate</th>
+                <th>ROI</th>
+                <th>Yield</th>
+                <th>Brier</th>
+                <th>Log Loss</th>
+                <th>Picks</th>
+                <th>Mejor liga</th>
+                <th>Mejor mercado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for perf in model_performance %}
+              <tr>
+                <td>{{ perf.model_name }}</td>
+                <td class="numeric">{{ "%.1f"|format((perf.hit_rate or 0) * 100) }}%</td>
+                <td class="numeric {% if (perf.roi or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.roi or 0) }}</td>
+                <td class="numeric {% if (perf.yield_rate or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.yield_rate or 0) }}</td>
+                <td class="numeric">{{ "%.4f"|format(perf.brier_score or 0) }}</td>
+                <td class="numeric">{{ "%.4f"|format(perf.log_loss or 0) }}</td>
+                <td class="numeric">{{ perf.total_picks }}</td>
+                <td><span class="pill">{{ perf.best_league or "N/D" }}</span></td>
+                <td><span class="pill">{{ perf.best_market or "N/D" }}</span></td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty">Todavía no hay predicciones cerradas para evaluar.</div>
+        {% endif %}
+      </article>
+
+      <article class="panel table-panel">
+        <div class="table-head">
+          <h2>Hit rate y ROI por mercado</h2>
+          <p class="muted">Agrupado por modelo</p>
+        </div>
+        {% if model_performance %}
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Modelo</th>
+                <th>Mercado</th>
+                <th>Hit rate</th>
+                <th>ROI</th>
+                <th>Yield</th>
+                <th>Picks</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for perf in model_performance %}
+                {% for market in perf.markets %}
+                <tr>
+                  <td>{{ perf.model_name }}</td>
+                  <td><span class="pill">{{ market.market }}</span></td>
+                  <td class="numeric">{{ "%.1f"|format((market.hit_rate or 0) * 100) }}%</td>
+                  <td class="numeric {% if (market.roi or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(market.roi or 0) }}</td>
+                  <td class="numeric {% if (market.yield_rate or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(market.yield_rate or 0) }}</td>
+                  <td class="numeric">{{ market.total_picks }}</td>
+                </tr>
+                {% endfor %}
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty">Sin mercados evaluados todavía.</div>
+        {% endif %}
+      </article>
+
+      <article class="panel table-panel">
+        <div class="table-head">
+          <h2>Últimas predicciones</h2>
+          <p class="muted">Últimas 50 generadas por el motor</p>
+        </div>
+        {% if recent_predictions %}
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Modelo</th>
+                <th>Liga</th>
+                <th>Mercado</th>
+                <th>Prob.</th>
+                <th>Cuota</th>
+                <th>Value</th>
+                <th>Resultado</th>
+                <th>Profit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for prediction in recent_predictions %}
+              <tr>
+                <td class="numeric">{{ prediction.predicted_at or "N/D" }}</td>
+                <td>{{ prediction.model_name }}</td>
+                <td>{{ prediction.league or "N/D" }}</td>
+                <td><span class="pill">{{ prediction.market or "N/D" }}</span></td>
+                <td class="numeric">{{ "%.1f"|format((prediction.probability or 0) * 100) }}%</td>
+                <td class="numeric">{% if prediction.real_odds %}@{{ "%.2f"|format(prediction.real_odds) }}{% else %}N/D{% endif %}</td>
+                <td class="numeric {% if (prediction.value_score or 0) > 0 %}positive{% endif %}">{{ "%+.3f"|format(prediction.value_score or 0) }}</td>
+                <td>
+                  {% if prediction.correct is sameas true %}
+                    <span class="positive">Correcta</span>
+                  {% elif prediction.correct is sameas false %}
+                    <span class="negative">Incorrecta</span>
+                  {% else %}
+                    <span class="muted">Pendiente</span>
+                  {% endif %}
+                </td>
+                <td class="numeric {% if prediction.profit is not none and prediction.profit >= 0 %}positive{% elif prediction.profit is not none %}negative{% endif %}">
+                  {% if prediction.profit is none %}-{% else %}{{ "%+.2f"|format(prediction.profit) }}{% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty">Todavía no hay predicciones guardadas.</div>
+        {% endif %}
       </article>
     </section>
 

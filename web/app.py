@@ -5,6 +5,12 @@ from datetime import datetime
 from flask import Flask, jsonify, render_template
 
 from services.database import get_connection, initialize_db
+from services.evaluation_engine import (
+    get_model_performance,
+    get_recent_predictions,
+    get_value_bet_performance,
+    get_value_bets,
+)
 
 app = Flask(__name__)
 
@@ -158,9 +164,34 @@ def _load_bets() -> list[dict]:
     return [dict(row) for row in rows]
 
 
+def _load_performance_dashboard() -> dict:
+    performance = get_model_performance()
+    if not performance.get("available"):
+        return {"models": [], "total_predictions": 0}
+    return performance
+
+
 @app.get("/health")
 def health():
     return jsonify({"status": "ok"})
+
+
+@app.get("/api/performance")
+def api_performance():
+    return jsonify(get_model_performance())
+
+
+@app.get("/api/predictions")
+def api_predictions():
+    return jsonify({"predictions": get_recent_predictions(limit=50)})
+
+
+@app.get("/api/value-bets")
+def api_value_bets():
+    return jsonify({
+        "performance": get_value_bet_performance(),
+        "picks": get_value_bets(limit=50),
+    })
 
 
 @app.route("/")
@@ -168,11 +199,14 @@ def health():
 def dashboard():
     bets = _load_bets()
     bankroll = _bankroll_series(bets)
+    performance = _load_performance_dashboard()
     return render_template(
         "dashboard.html",
         summary=_summary(bets),
         bets=_display_bets(bets),
         category_stats=_category_stats(bets),
+        model_performance=performance.get("models", []),
+        recent_predictions=get_recent_predictions(limit=50),
         chart_labels=json.dumps(bankroll["labels"]),
         chart_values=json.dumps(bankroll["values"]),
     )

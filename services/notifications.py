@@ -32,6 +32,7 @@ from collectors.odds_collector import collect_odds
 from collectors.stats_collector import collect_finished_match_stats
 from models.corners_model import retrain_if_needed
 from services.anthropic_client import analyze_match
+from services.evaluation_engine import run_daily_evaluation
 from services.football_data import (
     _get,
     get_fixtures_today,
@@ -61,6 +62,7 @@ FIXTURES_COLLECTOR_INTERVAL = 6 * 60 * 60  # scheduler: upcoming fixtures every 
 STATS_COLLECTOR_INTERVAL = 2 * 60 * 60     # scheduler: finished match stats every 2h
 ODDS_COLLECTOR_INTERVAL = 2 * 60 * 60      # scheduler: odds snapshots every 2h
 INJURIES_COLLECTOR_INTERVAL = 6 * 60 * 60  # scheduler: injuries every 6h
+EVALUATION_ENGINE_INTERVAL = 24 * 60 * 60  # scheduler: settled prediction evaluation every 24h
 MODEL_RETRAIN_INTERVAL = 7 * 24 * 60 * 60   # scheduler: model retrain every week
 
 
@@ -647,6 +649,14 @@ def retrain_corners_model_job() -> int:
     return int(result.get("new_matches") or 0)
 
 
+def evaluation_engine_job() -> int:
+    result = run_daily_evaluation()
+    performance = result.get("performance") or {}
+    models = performance.get("models") or []
+    logging.info("[evaluation-engine] modelos evaluados=%s", len(models))
+    return int(performance.get("total_predictions") or 0)
+
+
 # --------------------------------------------------------------------------- #
 # Threading scheduler (no APScheduler)
 # --------------------------------------------------------------------------- #
@@ -709,6 +719,11 @@ def start_schedulers():
     ).start()
     threading.Thread(
         target=_run_loop,
+        args=(evaluation_engine_job, EVALUATION_ENGINE_INTERVAL, 210, "evaluation-engine"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_run_loop,
         args=(
             retrain_corners_model_job,
             MODEL_RETRAIN_INTERVAL,
@@ -721,7 +736,7 @@ def start_schedulers():
         (
             "Schedulers iniciados: pre-partido cada %smin, resultados cada %smin, "
             "fixtures cada %smin, stats cada %smin, odds cada %smin, injuries cada %smin, "
-            "modelo domingos 03:00 UTC."
+            "evaluation cada %sh, modelo domingos 03:00 UTC."
         ),
         PRE_MATCH_INTERVAL // 60,
         RESULTS_INTERVAL // 60,
@@ -729,4 +744,5 @@ def start_schedulers():
         STATS_COLLECTOR_INTERVAL // 60,
         ODDS_COLLECTOR_INTERVAL // 60,
         INJURIES_COLLECTOR_INTERVAL // 60,
+        EVALUATION_ENGINE_INTERVAL // 3600,
     )

@@ -187,6 +187,8 @@ class ModelPerformance(Base):
     brier_score: Mapped[float | None] = mapped_column(Float)
     log_loss: Mapped[float | None] = mapped_column(Float)
     league: Mapped[str | None] = mapped_column(String(255))
+    best_league: Mapped[str | None] = mapped_column(String(255))
+    best_market: Mapped[str | None] = mapped_column(String(100))
     sample_size: Mapped[int | None] = mapped_column(Integer)
     # Real number of picks evaluated on the held-out test set (not the full
     # dataset size, which is stored in sample_size).
