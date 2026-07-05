@@ -30,6 +30,48 @@
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
 
+    .app-shell {
+      display: grid;
+      grid-template-columns: 240px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    .sidebar {
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      padding: 22px 16px;
+      border-right: 1px solid var(--border);
+      background: #090d12;
+    }
+
+    .brand {
+      margin-bottom: 24px;
+    }
+
+    .brand strong {
+      display: block;
+      font-size: 22px;
+      letter-spacing: .08em;
+    }
+
+    .nav {
+      display: grid;
+      gap: 7px;
+    }
+
+    .nav a {
+      color: var(--muted);
+      text-decoration: none;
+      padding: 10px 12px;
+      border-radius: 8px;
+    }
+
+    .nav a:hover {
+      color: var(--text);
+      background: var(--panel-soft);
+    }
+
     main {
       width: min(1180px, calc(100% - 32px));
       margin: 0 auto;
@@ -144,6 +186,50 @@
 
     .table-panel { overflow: hidden; }
     .stack { display: grid; gap: 16px; margin-bottom: 16px; }
+    .triple { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
+    .match-list { display: grid; gap: 10px; margin-top: 14px; }
+    .match-row {
+      display: grid;
+      gap: 5px;
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-soft);
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    input, select, button {
+      min-height: 38px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #0e131a;
+      color: var(--text);
+      padding: 8px 10px;
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+      background: var(--blue);
+      color: #06101b;
+      font-weight: 700;
+      border-color: transparent;
+    }
+
+    .detail-box {
+      margin-top: 12px;
+      padding: 14px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--panel-soft);
+      min-height: 80px;
+    }
 
     .table-head {
       display: flex;
@@ -197,9 +283,13 @@
     .empty { padding: 28px 18px; color: var(--muted); }
 
     @media (max-width: 900px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar { position: static; height: auto; }
+      .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       header { align-items: start; flex-direction: column; }
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .grid { grid-template-columns: 1fr; }
+      .triple { grid-template-columns: 1fr; }
       .chart-wrap { height: 260px; }
     }
 
@@ -211,8 +301,23 @@
   </style>
 </head>
 <body>
+  <div class="app-shell">
+  <aside class="sidebar">
+    <div class="brand">
+      <strong>STATORA</strong>
+      <p class="muted">Sports intelligence</p>
+    </div>
+    <nav class="nav">
+      <a href="#overview">Overview</a>
+      <a href="#matches">Partidos</a>
+      <a href="#players">Player Explorer</a>
+      <a href="#teams">Equipos</a>
+      <a href="#predictions">Predicciones</a>
+      <a href="#bets">SQLite Bets</a>
+    </nav>
+  </aside>
   <main>
-    <header>
+    <header id="overview">
       <div>
         <h1>EdgeBet Dashboard</h1>
         <p class="muted">Historial, rendimiento y evolución de bankroll.</p>
@@ -305,7 +410,110 @@
       </article>
     </section>
 
-    <section class="stack">
+    <section id="matches" class="triple">
+      <article class="panel">
+        <h2>Partidos del día</h2>
+        <div class="match-list">
+          {% for match in dashboard_matches.today %}
+          <div class="match-row">
+            <strong>{{ match.home_team }} vs {{ match.away_team }}</strong>
+            <span class="muted">{{ match.league or "No disponible" }} · {{ match.status or "No disponible" }}</span>
+            <span>{{ match.result or "No disponible" }}</span>
+          </div>
+          {% else %}
+          <p class="empty">No hay partidos del día guardados.</p>
+          {% endfor %}
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Próximos partidos</h2>
+        <div class="match-list">
+          {% for match in dashboard_matches.upcoming %}
+          <div class="match-row">
+            <strong>{{ match.home_team }} vs {{ match.away_team }}</strong>
+            <span class="muted">{{ match.league or "No disponible" }} · {{ match.date or "No disponible" }}</span>
+            <span>{% if match.has_predictions %}Con predicción{% else %}Sin predicción{% endif %}</span>
+          </div>
+          {% else %}
+          <p class="empty">No hay próximos partidos guardados.</p>
+          {% endfor %}
+        </div>
+      </article>
+      <article class="panel">
+        <h2>Finalizados</h2>
+        <div class="match-list">
+          {% for match in dashboard_matches.finished %}
+          <div class="match-row">
+            <strong>{{ match.home_team }} {{ match.result or "" }} {{ match.away_team }}</strong>
+            <span class="muted">{{ match.league or "No disponible" }} · stats: {% if match.has_stats %}sí{% else %}no{% endif %}</span>
+            <span>{% if match.has_predictions %}Con predicción{% else %}Sin predicción{% endif %}</span>
+          </div>
+          {% else %}
+          <p class="empty">No hay partidos finalizados guardados.</p>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+
+    <section class="panel table-panel">
+      <div class="table-head">
+        <h2>Todos los partidos</h2>
+        <p class="muted">Filtros contra /api/matches</p>
+      </div>
+      <div class="filters">
+        <input id="matchDate" type="date" aria-label="Fecha">
+        <input id="matchLeague" placeholder="Liga">
+        <input id="matchTeam" placeholder="Equipo">
+        <select id="matchStatus">
+          <option value="">Estado</option>
+          <option value="NS">NS</option>
+          <option value="FT">FT</option>
+          <option value="AET">AET</option>
+          <option value="PEN">PEN</option>
+        </select>
+        <select id="matchHasPrediction">
+          <option value="">Predicción</option>
+          <option value="true">Con predicción</option>
+          <option value="false">Sin predicción</option>
+        </select>
+        <button type="button" onclick="loadMatches()">Filtrar</button>
+      </div>
+      <div id="matchesResult" class="detail-box">Usá los filtros para cargar partidos.</div>
+    </section>
+
+    <section id="players" class="grid">
+      <article class="panel">
+        <h2>Player Explorer</h2>
+        <p class="muted">Buscá jugadores cargados en PostgreSQL.</p>
+        <div class="filters">
+          <input id="playerQuery" placeholder="Nombre del jugador">
+          <button type="button" onclick="searchPlayers()">Buscar</button>
+        </div>
+        <div id="playerResults" class="detail-box">Sin búsqueda activa.</div>
+      </article>
+      <article class="panel">
+        <h2>Ficha del jugador</h2>
+        <div id="playerDetail" class="detail-box">Seleccioná un jugador para ver su ficha y últimos 7 partidos.</div>
+      </article>
+    </section>
+
+    <section id="teams" class="grid">
+      <article class="panel">
+        <h2>Equipos</h2>
+        <p class="muted">Buscador de equipos, plantel, forma y predicciones asociadas.</p>
+        <div class="filters">
+          <input id="teamQuery" placeholder="Nombre del equipo">
+          <button type="button" onclick="searchTeams()">Buscar</button>
+        </div>
+        <div id="teamResults" class="detail-box">Sin búsqueda activa.</div>
+      </article>
+      <article class="panel">
+        <h2>Perfil de equipo</h2>
+        <div id="teamDetail" class="detail-box">Seleccioná un equipo para ver su perfil.</div>
+      </article>
+    </section>
+
+    <section id="predictions" class="stack">
       <article class="panel table-panel">
         <div class="table-head">
           <h2>Performance de modelos</h2>
@@ -500,7 +708,7 @@
       </article>
     </section>
 
-    <section class="panel table-panel">
+    <section id="bets" class="panel table-panel">
       <div class="table-head">
         <h2>Tabla de apuestas</h2>
         <p class="muted">Más recientes primero</p>
@@ -541,6 +749,7 @@
       {% endif %}
     </section>
   </main>
+  </div>
 
   <script>
     const labels = {{ chart_labels | safe }};
@@ -589,6 +798,154 @@
         }
       }
     });
+
+    const na = (value) => value === null || value === undefined || value === '' ? 'No disponible' : value;
+    const pct = (value) => value === null || value === undefined ? 'No disponible' : `${(value * 100).toFixed(1)}%`;
+
+    async function fetchJson(url) {
+      const response = await fetch(url);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      return response.json();
+    }
+
+    function table(headers, rows) {
+      if (!rows.length) return '<p class="empty">No disponible</p>';
+      return `<div class="table-scroll"><table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+    }
+
+    async function loadMatches() {
+      const params = new URLSearchParams();
+      const date = document.getElementById('matchDate').value;
+      const league = document.getElementById('matchLeague').value;
+      const team = document.getElementById('matchTeam').value;
+      const status = document.getElementById('matchStatus').value;
+      const hasPrediction = document.getElementById('matchHasPrediction').value;
+      if (date) params.set('date', date);
+      if (league) params.set('league', league);
+      if (team) params.set('team', team);
+      if (status) params.set('status', status);
+      if (hasPrediction) params.set('has_prediction', hasPrediction);
+      params.set('limit', '50');
+      const target = document.getElementById('matchesResult');
+      target.textContent = 'Cargando...';
+      try {
+        const data = await fetchJson(`/api/matches?${params.toString()}`);
+        if (!data.available) {
+          target.textContent = data.error || 'No disponible';
+          return;
+        }
+        target.innerHTML = table(
+          ['Fecha', 'Liga', 'Partido', 'Estado', 'Resultado', 'Stats', 'Predicción'],
+          data.items.map(item => `<tr>
+            <td class="numeric">${na(item.date)}</td>
+            <td>${na(item.league)}</td>
+            <td>${na(item.home_team)} vs ${na(item.away_team)}</td>
+            <td><span class="pill">${na(item.status)}</span></td>
+            <td>${na(item.result)}</td>
+            <td>${item.has_stats ? 'Sí' : 'No'}</td>
+            <td>${item.has_predictions ? 'Sí' : 'No'}</td>
+          </tr>`)
+        );
+      } catch (err) {
+        target.textContent = `Error: ${err.message}`;
+      }
+    }
+
+    async function searchPlayers() {
+      const q = document.getElementById('playerQuery').value;
+      const target = document.getElementById('playerResults');
+      target.textContent = 'Buscando...';
+      try {
+        const data = await fetchJson(`/api/players/search?q=${encodeURIComponent(q)}&limit=20`);
+        if (!data.available) {
+          target.textContent = data.error || 'No disponible';
+          return;
+        }
+        target.innerHTML = data.items.length
+          ? data.items.map(player => `<button type="button" onclick="loadPlayer(${player.id})">${na(player.name)}</button>`).join(' ')
+          : '<p class="empty">No disponible</p>';
+      } catch (err) {
+        target.textContent = `Error: ${err.message}`;
+      }
+    }
+
+    async function loadPlayer(id) {
+      const detail = document.getElementById('playerDetail');
+      detail.textContent = 'Cargando ficha...';
+      try {
+        const [profile, last] = await Promise.all([
+          fetchJson(`/api/players/${id}`),
+          fetchJson(`/api/players/${id}/last-matches?limit=7`)
+        ]);
+        const p = profile.player || {};
+        const rows = (last.items || []).map(match => `<tr>
+          <td>${na(match.date)}</td><td>${na(match.rival)}</td><td>${na(match.competition)}</td>
+          <td>${na(match.minutes)}</td><td>${na(match.goals)}</td><td>${na(match.assists)}</td>
+          <td>${na(match.shots)}</td><td>${na(match.shots_on_target)}</td><td>${na(match.fouls)}</td>
+          <td>${na(match.fouls_drawn)}</td><td>${na(match.cards)}</td><td>${na(match.rating)}</td><td>${na(match.result)}</td>
+        </tr>`);
+        const s = last.summary || {};
+        detail.innerHTML = `
+          <h2>${na(p.name)}</h2>
+          <p class="muted">${na(p.team)} · ${na(p.position)} · ${na(p.league)}</p>
+          <div class="summary" style="margin-top:12px">
+            <div class="card"><div class="label">Goles</div><div class="value">${na(p.goals)}</div></div>
+            <div class="card"><div class="label">Asist.</div><div class="value">${na(p.assists)}</div></div>
+            <div class="card"><div class="label">Remates</div><div class="value">${na(p.shots)}</div></div>
+            <div class="card"><div class="label">Rating</div><div class="value">${na(p.rating)}</div></div>
+          </div>
+          <p class="sub">Edad: ${na(p.age)} · Nacionalidad: ${na(p.nationality)} · Altura: ${na(p.height)} · Peso: ${na(p.weight)}</p>
+          <p class="sub">Lesiones: ${(p.injuries || []).length ? p.injuries.map(i => na(i.reason)).join(', ') : 'No disponible'}</p>
+          <h2 style="margin-top:16px">Últimos 7 partidos</h2>
+          <p class="sub">Prom. remates: ${na(s.avg_shots)} · al arco: ${na(s.avg_shots_on_target)} · faltas: ${na(s.avg_fouls)} · recibidas: ${na(s.avg_fouls_drawn)} · minutos: ${na(s.avg_minutes)} · goles: ${na(s.goals_last_7)} · asistencias: ${na(s.assists_last_7)} · tendencia: ${na(s.trend)}</p>
+          ${table(['Fecha','Rival','Comp.','Min','G','A','Rem','Arco','Faltas','Recib.','Tarj.','Rating','Resultado'], rows)}
+        `;
+      } catch (err) {
+        detail.textContent = `Error: ${err.message}`;
+      }
+    }
+
+    async function searchTeams() {
+      const q = document.getElementById('teamQuery').value;
+      const target = document.getElementById('teamResults');
+      target.textContent = 'Buscando...';
+      try {
+        const data = await fetchJson(`/api/teams/search?q=${encodeURIComponent(q)}&limit=20`);
+        if (!data.available) {
+          target.textContent = data.error || 'No disponible';
+          return;
+        }
+        target.innerHTML = data.items.length
+          ? data.items.map(team => `<button type="button" onclick="loadTeam(${team.id})">${na(team.name)}</button>`).join(' ')
+          : '<p class="empty">No disponible</p>';
+      } catch (err) {
+        target.textContent = `Error: ${err.message}`;
+      }
+    }
+
+    async function loadTeam(id) {
+      const detail = document.getElementById('teamDetail');
+      detail.textContent = 'Cargando equipo...';
+      try {
+        const data = await fetchJson(`/api/teams/${id}`);
+        const team = data.team || {};
+        const squad = (team.squad || []).slice(0, 18).map(player => `<span class="pill">${na(player.name)}</span>`).join(' ');
+        detail.innerHTML = `
+          <h2>${na(team.name)}</h2>
+          <p class="muted">${na(team.country)} · ${na(team.league)}</p>
+          <div class="summary" style="margin-top:12px">
+            <div class="card"><div class="label">Corners favor</div><div class="value">${na(team.stats?.corners_for)}</div></div>
+            <div class="card"><div class="label">Remates</div><div class="value">${na(team.stats?.shots)}</div></div>
+            <div class="card"><div class="label">Predicciones</div><div class="value">${(team.predictions || []).length}</div></div>
+            <div class="card"><div class="label">Forma</div><div class="value">${na(team.stats?.recent_form)}</div></div>
+          </div>
+          <h2 style="margin-top:16px">Plantel</h2>
+          <div class="filters">${squad || 'No disponible'}</div>
+        `;
+      } catch (err) {
+        detail.textContent = `Error: ${err.message}`;
+      }
+    }
   </script>
 </body>
 </html>
