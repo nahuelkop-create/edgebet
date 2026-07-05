@@ -47,6 +47,7 @@
     h1, h2, p { margin: 0; }
     h1 { font-size: clamp(26px, 4vw, 38px); letter-spacing: 0; }
     h2 { font-size: 17px; font-weight: 700; }
+    .section-title { margin: 24px 0 12px; }
     .muted { color: var(--muted); }
 
     .summary {
@@ -270,11 +271,45 @@
       </article>
     </section>
 
+    <div class="section-title">
+      <h2>PostgreSQL Platform</h2>
+      <p class="muted">
+        {% if postgres_stats.available %}
+          Datos reales acumulados por collectors, modelos y evaluation engine.
+        {% else %}
+          PostgreSQL no disponible: {{ postgres_stats.error or "DATABASE_URL no configurado" }}.
+        {% endif %}
+      </p>
+    </div>
+
+    <section class="summary">
+      <article class="card">
+        <div class="label">Fixtures guardados</div>
+        <div class="value">{{ postgres_stats.fixtures or 0 }}</div>
+        <div class="sub">Partidos en PostgreSQL</div>
+      </article>
+      <article class="card">
+        <div class="label">Partidos con stats</div>
+        <div class="value">{{ postgres_stats.fixtures_with_stats or 0 }}</div>
+        <div class="sub">Fixtures con team_stats</div>
+      </article>
+      <article class="card">
+        <div class="label">Predicciones totales</div>
+        <div class="value">{{ postgres_stats.predictions_total or 0 }}</div>
+        <div class="sub">Todas las predicciones guardadas</div>
+      </article>
+      <article class="card">
+        <div class="label">Predicciones settled</div>
+        <div class="value">{{ postgres_stats.predictions_settled or 0 }}</div>
+        <div class="sub">Evaluadas contra resultado real</div>
+      </article>
+    </section>
+
     <section class="stack">
       <article class="panel table-panel">
         <div class="table-head">
           <h2>Performance de modelos</h2>
-          <p class="muted">Predicciones cerradas en PostgreSQL</p>
+          <p class="muted">Tabla model_performance de PostgreSQL</p>
         </div>
         {% if model_performance %}
         <div class="table-scroll">
@@ -282,6 +317,8 @@
             <thead>
               <tr>
                 <th>Modelo</th>
+                <th>Mercado</th>
+                <th>Liga</th>
                 <th>Hit rate</th>
                 <th>ROI</th>
                 <th>Yield</th>
@@ -296,6 +333,8 @@
               {% for perf in model_performance %}
               <tr>
                 <td>{{ perf.model_name }}</td>
+                <td><span class="pill">{{ perf.market or "N/D" }}</span></td>
+                <td>{{ perf.league or "N/D" }}</td>
                 <td class="numeric">{{ "%.1f"|format((perf.hit_rate or 0) * 100) }}%</td>
                 <td class="numeric {% if (perf.roi or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.roi or 0) }}</td>
                 <td class="numeric {% if (perf.yield_rate or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.yield_rate or 0) }}</td>
@@ -310,7 +349,7 @@
           </table>
         </div>
         {% else %}
-        <div class="empty">Todavía no hay predicciones cerradas para evaluar.</div>
+        <div class="empty">El modelo está acumulando datos. Las métricas aparecerán cuando haya suficientes partidos evaluados.</div>
         {% endif %}
       </article>
 
@@ -319,7 +358,7 @@
           <h2>Hit rate y ROI por mercado</h2>
           <p class="muted">Agrupado por modelo</p>
         </div>
-        {% if model_performance %}
+        {% if computed_model_performance %}
         <div class="table-scroll">
           <table>
             <thead>
@@ -333,7 +372,7 @@
               </tr>
             </thead>
             <tbody>
-              {% for perf in model_performance %}
+              {% for perf in computed_model_performance %}
                 {% for market in perf.markets %}
                 <tr>
                   <td>{{ perf.model_name }}</td>
@@ -349,7 +388,61 @@
           </table>
         </div>
         {% else %}
-        <div class="empty">Sin mercados evaluados todavía.</div>
+        <div class="empty">El modelo está acumulando datos. Las métricas aparecerán cuando haya suficientes partidos evaluados.</div>
+        {% endif %}
+      </article>
+
+      <article class="panel table-panel">
+        <div class="table-head">
+          <h2>Value bets detectados</h2>
+          <p class="muted">
+            Hit rate:
+            {% if value_bet_performance.available %}
+              {{ "%.1f"|format((value_bet_performance.value_bets.hit_rate or 0) * 100) }}%
+            {% else %}
+              N/D
+            {% endif %}
+          </p>
+        </div>
+        {% if value_bets %}
+        <div class="table-scroll">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Modelo</th>
+                <th>Mercado</th>
+                <th>Prob.</th>
+                <th>Cuota</th>
+                <th>Value</th>
+                <th>Resultado</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for pick in value_bets %}
+              <tr>
+                <td class="numeric">{{ pick.predicted_at or "N/D" }}</td>
+                <td>{{ pick.model_name }}</td>
+                <td><span class="pill">{{ pick.market or "N/D" }}</span></td>
+                <td class="numeric">{{ "%.1f"|format((pick.probability or 0) * 100) }}%</td>
+                <td class="numeric">{% if pick.real_odds %}@{{ "%.2f"|format(pick.real_odds) }}{% else %}N/D{% endif %}</td>
+                <td class="numeric positive">{{ "%+.3f"|format(pick.value_score or 0) }}</td>
+                <td>
+                  {% if pick.correct is sameas true %}
+                    <span class="positive">Correcta</span>
+                  {% elif pick.correct is sameas false %}
+                    <span class="negative">Incorrecta</span>
+                  {% else %}
+                    <span class="muted">Pendiente</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% else %}
+        <div class="empty">Sin value bets detectados aún.</div>
         {% endif %}
       </article>
 
@@ -402,7 +495,7 @@
           </table>
         </div>
         {% else %}
-        <div class="empty">Todavía no hay predicciones guardadas.</div>
+        <div class="empty">Sin predicciones evaluadas aún.</div>
         {% endif %}
       </article>
     </section>

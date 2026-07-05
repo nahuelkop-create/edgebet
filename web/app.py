@@ -7,6 +7,8 @@ from flask import Flask, jsonify, render_template
 from services.database import get_connection, initialize_db
 from services.evaluation_engine import (
     get_model_performance,
+    get_model_performance_history,
+    get_postgres_stats,
     get_recent_predictions,
     get_value_bet_performance,
     get_value_bets,
@@ -165,10 +167,14 @@ def _load_bets() -> list[dict]:
 
 
 def _load_performance_dashboard() -> dict:
-    performance = get_model_performance()
-    if not performance.get("available"):
-        return {"models": [], "total_predictions": 0}
-    return performance
+    return {
+        "stats": get_postgres_stats(),
+        "performance_rows": get_model_performance_history(limit=50),
+        "computed_performance": get_model_performance(persist=False),
+        "recent_predictions": get_recent_predictions(limit=50),
+        "value_bet_performance": get_value_bet_performance(),
+        "value_bets": get_value_bets(limit=50),
+    }
 
 
 @app.get("/health")
@@ -178,7 +184,11 @@ def health():
 
 @app.get("/api/performance")
 def api_performance():
-    return jsonify(get_model_performance())
+    return jsonify({
+        "stats": get_postgres_stats(),
+        "computed": get_model_performance(persist=False),
+        "history": get_model_performance_history(limit=50),
+    })
 
 
 @app.get("/api/predictions")
@@ -205,8 +215,12 @@ def dashboard():
         summary=_summary(bets),
         bets=_display_bets(bets),
         category_stats=_category_stats(bets),
-        model_performance=performance.get("models", []),
-        recent_predictions=get_recent_predictions(limit=50),
+        postgres_stats=performance["stats"],
+        model_performance=performance["performance_rows"],
+        computed_model_performance=performance["computed_performance"].get("models", []),
+        recent_predictions=performance["recent_predictions"],
+        value_bet_performance=performance["value_bet_performance"],
+        value_bets=performance["value_bets"],
         chart_labels=json.dumps(bankroll["labels"]),
         chart_values=json.dumps(bankroll["values"]),
     )

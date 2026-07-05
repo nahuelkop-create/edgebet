@@ -4,10 +4,10 @@ from collections import defaultdict
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import distinct, func, select
 
 from db.connection import get_session
-from db.models import ModelPerformance, Prediction
+from db.models import Fixture, ModelPerformance, Prediction, TeamStat
 
 
 def _safe_probability(value: float | None) -> float:
@@ -49,6 +49,25 @@ def _serialize_prediction(prediction: Prediction) -> dict[str, Any]:
         "clv": prediction.clv,
         "predicted_at": prediction.predicted_at.isoformat() if prediction.predicted_at else None,
         "settled_at": prediction.settled_at.isoformat() if prediction.settled_at else None,
+    }
+
+
+def _serialize_performance(row: ModelPerformance) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "model_name": row.model_name,
+        "market": row.market,
+        "league": row.league,
+        "hit_rate": row.hit_rate,
+        "roi": row.roi,
+        "yield_rate": row.yield_rate,
+        "brier_score": row.brier_score,
+        "log_loss": row.log_loss,
+        "sample_size": row.sample_size,
+        "total_picks": row.total_picks,
+        "best_league": row.best_league,
+        "best_market": row.best_market,
+        "last_updated": row.last_updated.isoformat() if row.last_updated else None,
     }
 
 
@@ -150,7 +169,11 @@ def _save_model_performance(
         session.commit()
 
 
-def get_model_performance(model_name: str | None = None, league: str | None = None) -> dict[str, Any]:
+def get_model_performance(
+    model_name: str | None = None,
+    league: str | None = None,
+    persist: bool = True,
+) -> dict[str, Any]:
     """Evaluate settled predictions and persist model-level performance snapshots."""
     try:
         rows = _prediction_rows(model_name=model_name, league=league)
@@ -176,12 +199,13 @@ def get_model_performance(model_name: str | None = None, league: str | None = No
             "leagues": _league_metrics(model_rows),
         }
         models.append(model_result)
-        try:
-            _save_model_performance(name, "ALL", league, metrics, best_league, best_market)
-        except RuntimeError:
-            logging.info("[evaluation_engine] DATABASE_URL no configurado; no se guardan métricas.")
-        except Exception:
-            logging.exception("[evaluation_engine] no se pudo guardar performance de %s", name)
+        if persist:
+            try:
+                _save_model_performance(name, "ALL", league, metrics, best_league, best_market)
+            except RuntimeError:
+                logging.info("[evaluation_engine] DATABASE_URL no configurado; no se guardan métricas.")
+            except Exception:
+                logging.exception("[evaluation_engine] no se pudo guardar performance de %s", name)
 
     return {
         "available": True,
@@ -269,6 +293,49 @@ def get_value_bets(limit: int = 50) -> list[dict[str, Any]]:
             .limit(limit)
         ).all()
         return [_serialize_prediction(row) for row in rows]
+
+
+def get_postgres_stats() -> dict[str, Any]:
+    try:
+        session = get_session()
+    except RuntimeError as exc:
+        return {
+            "available": False,
+            "error": str(exc),
+            "fixtures": 0,
+            "fixtures_with_stats": 0,
+            "predictions_total": 0,
+            "predictions_settled": 0,
+        }
+
+    with session:
+        fixtures = session.scalar(select(func.count(Fixture.id))) or 0
+        fixtures_with_stats = session.scalar(select(func.count(distinct(TeamStat.fixture_id)))) or 0
+        predictions_total = session.scalar(select(func.count(Prediction.id))) or 0
+        predictions_settled = session.scalar(
+            select(func.count(Prediction.id)).where(Prediction.correct.is_not(None))
+        ) or 0
+        return {
+            "available": True,
+            "fixtures": int(fixtures),
+            "fixtures_with_stats": int(fixtures_with_stats),
+            "predictions_total": int(predictions_total),
+            "predictions_settled": int(predictions_settled),
+        }
+
+
+def get_model_performance_history(limit: int = 50) -> list[dict[str, Any]]:
+    try:
+        session = get_session()
+    except RuntimeError:
+        return []
+    with session:
+        rows = session.scalars(
+            select(ModelPerformance)
+            .order_by(ModelPerformance.last_updated.desc())
+            .limit(limit)
+        ).all()
+        return [_serialize_performance(row) for row in rows]
 
 
 def run_daily_evaluation() -> dict[str, Any]:
