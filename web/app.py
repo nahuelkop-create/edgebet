@@ -1,9 +1,15 @@
 import json
+import sys
 import unicodedata
 from datetime import datetime
+from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
 from sqlalchemy import distinct, func, or_, select
+
+ROOT_DIR = Path(__file__).resolve().parents[1]
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
 
 from db.connection import get_session
 from db.models import (
@@ -30,6 +36,7 @@ from services.evaluation_engine import (
 app = Flask(__name__)
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 UPCOMING_STATUSES = {"TBD", "NS", "PST", "SCHEDULED", "TIMED"}
+MONTHS_ES = ("Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic")
 
 
 def _money(value) -> float:
@@ -56,6 +63,30 @@ def _normalize(text: str) -> str:
 
 def _iso(value):
     return value.isoformat() if value else None
+
+
+def _format_date_es(value, with_time: bool = False) -> str:
+    if not value:
+        return "N/D"
+    dt = value
+    if not isinstance(value, datetime):
+        dt = _parse_dt(str(value))
+    if dt == datetime.min:
+        return "N/D"
+    label = f"{dt.day} {MONTHS_ES[dt.month - 1]} {dt.year}"
+    if with_time:
+        label = f"{label} {dt.strftime('%H:%M')}"
+    return label
+
+
+@app.template_filter("date_es")
+def date_es_filter(value):
+    return _format_date_es(value)
+
+
+@app.template_filter("datetime_es")
+def datetime_es_filter(value):
+    return _format_date_es(value, with_time=True)
 
 
 def _sort_timestamp(value, fallback: float = 0.0) -> float:
@@ -311,7 +342,7 @@ def _display_bets(bets: list[dict]) -> list[dict]:
     for bet in ordered:
         row = dict(bet)
         dt = _parse_dt(row.get("created_at"))
-        row["date_label"] = dt.strftime("%d/%m/%Y %H:%M") if dt != datetime.min else "N/D"
+        row["date_label"] = _format_date_es(dt, with_time=True) if dt != datetime.min else "N/D"
         row["match_label"] = row.get("match_name") or row.get("league") or "Apuesta"
         row["result_label"] = _result_emoji(row.get("result"))
         row["profit_value"] = _money(row.get("profit")) if row.get("result") else None

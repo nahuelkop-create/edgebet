@@ -3,24 +3,28 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>EdgeBet Dashboard</title>
+  <title>STATORA Dashboard</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
       color-scheme: dark;
-      --bg: #0b0f14;
-      --panel: #121820;
-      --panel-soft: #17202b;
-      --border: #263241;
-      --text: #edf2f7;
-      --muted: #8ea0b5;
-      --green: #3ddc97;
-      --red: #ff5d6c;
-      --yellow: #f5c451;
-      --blue: #5ab0ff;
+      --bg: #0a0a0a;
+      --sidebar: #111111;
+      --card: #1a1a1a;
+      --card-soft: #151515;
+      --accent: #e63946;
+      --accent-soft: #ff6b6b;
+      --text: #ffffff;
+      --muted: #888888;
+      --border: #222222;
+      --positive: #00d4aa;
+      --warning: #ffd166;
+      --shadow: 0 18px 50px rgba(0, 0, 0, .35);
     }
 
     * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
 
     body {
       margin: 0;
@@ -28,621 +32,1128 @@
       background: var(--bg);
       color: var(--text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
     }
+
+    a { color: inherit; }
+    h1, h2, h3, p { margin: 0; }
 
     .app-shell {
       display: grid;
       grid-template-columns: 240px minmax(0, 1fr);
       min-height: 100vh;
+      background:
+        radial-gradient(circle at 80% -10%, rgba(230, 57, 70, .16), transparent 36rem),
+        var(--bg);
     }
 
     .sidebar {
       position: sticky;
       top: 0;
+      z-index: 20;
+      width: 240px;
       height: 100vh;
-      padding: 22px 16px;
+      padding: 26px 16px;
+      background: var(--sidebar);
       border-right: 1px solid var(--border);
-      background: #090d12;
     }
 
     .brand {
-      margin-bottom: 24px;
+      padding: 0 6px 20px;
+      margin-bottom: 18px;
+      border-bottom: 2px solid var(--accent);
     }
 
     .brand strong {
       display: block;
-      font-size: 22px;
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 900;
       letter-spacing: .08em;
+    }
+
+    .brand span {
+      display: block;
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .12em;
     }
 
     .nav {
       display: grid;
-      gap: 7px;
+      gap: 8px;
     }
 
     .nav a {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      min-height: 44px;
+      padding: 10px 12px;
+      border-radius: 12px;
       color: var(--muted);
       text-decoration: none;
-      padding: 10px 12px;
-      border-radius: 8px;
+      transition: color .18s ease, background .18s ease, transform .18s ease;
     }
 
     .nav a:hover {
       color: var(--text);
-      background: var(--panel-soft);
+      background: rgba(230, 57, 70, .12);
+      transform: translateX(2px);
+    }
+
+    .nav a.active {
+      color: var(--text);
+      background: var(--accent);
+      box-shadow: 0 12px 24px rgba(230, 57, 70, .2);
+    }
+
+    .nav svg, .icon {
+      flex: 0 0 auto;
+      width: 18px;
+      height: 18px;
+      stroke: currentColor;
+      stroke-width: 2;
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
     }
 
     main {
-      width: min(1180px, calc(100% - 32px));
+      min-width: 0;
+      width: min(1360px, calc(100% - 48px));
       margin: 0 auto;
-      padding: 28px 0 40px;
+      padding: 34px 0 48px;
     }
 
-    header {
+    .hero {
       display: flex;
-      align-items: end;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      margin-bottom: 24px;
+      animation: fadeIn .45s ease both;
+    }
+
+    .eyebrow {
+      color: var(--accent-soft);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .14em;
+      margin-bottom: 9px;
+    }
+
+    h1 {
+      font-size: clamp(34px, 4vw, 54px);
+      font-weight: 900;
+      line-height: .98;
+    }
+
+    .hero-copy {
+      margin-top: 12px;
+      color: var(--muted);
+      max-width: 660px;
+      line-height: 1.55;
+    }
+
+    .status-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      min-height: 36px;
+      padding: 8px 12px;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      background: rgba(26, 26, 26, .85);
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .status-chip::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--positive);
+      box-shadow: 0 0 18px var(--positive);
+    }
+
+    .section {
+      margin-top: 28px;
+      animation: fadeIn .55s ease both;
+    }
+
+    .section-head {
+      display: flex;
+      align-items: flex-end;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 22px;
+      margin-bottom: 14px;
     }
 
-    h1, h2, p { margin: 0; }
-    h1 { font-size: clamp(26px, 4vw, 38px); letter-spacing: 0; }
-    h2 { font-size: 17px; font-weight: 700; }
-    .section-title { margin: 24px 0 12px; }
-    .muted { color: var(--muted); }
+    .section-title {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    h2 {
+      font-size: 22px;
+      font-weight: 850;
+      line-height: 1.15;
+    }
+
+    h3 {
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .muted, .sub {
+      color: var(--muted);
+      line-height: 1.5;
+    }
+
+    .sub { font-size: 13px; }
 
     .summary {
       display: grid;
       grid-template-columns: repeat(4, minmax(0, 1fr));
-      gap: 12px;
-      margin-bottom: 18px;
-    }
-
-    .card, .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 8px;
-    }
-
-    .card { padding: 16px; }
-
-    .label {
-      color: var(--muted);
-      font-size: 12px;
-      text-transform: uppercase;
-      letter-spacing: .04em;
-      margin-bottom: 9px;
-    }
-
-    .value {
-      font-size: 26px;
-      font-weight: 800;
-      line-height: 1.1;
-    }
-
-    .positive { color: var(--green); }
-    .negative { color: var(--red); }
-
-    .sub {
-      color: var(--muted);
-      font-size: 13px;
-      margin-top: 8px;
-      line-height: 1.4;
+      gap: 16px;
     }
 
     .grid {
       display: grid;
-      grid-template-columns: minmax(0, 1.7fr) minmax(280px, .8fr);
-      gap: 16px;
-      margin-bottom: 16px;
+      grid-template-columns: minmax(0, 1.65fr) minmax(320px, .85fr);
+      gap: 18px;
     }
 
-    .panel {
-      padding: 18px;
+    .triple {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .stack {
+      display: grid;
+      gap: 18px;
+    }
+
+    .card, .panel, .metric-card {
       min-width: 0;
+      background: linear-gradient(180deg, rgba(255,255,255,.025), transparent), var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow);
+      transition: border-color .2s ease, transform .2s ease, box-shadow .2s ease;
+    }
+
+    .card:hover, .panel:hover, .metric-card:hover {
+      border-color: rgba(230, 57, 70, .58);
+      box-shadow: 0 22px 60px rgba(0, 0, 0, .45);
+    }
+
+    .metric-card {
+      display: grid;
+      gap: 12px;
+      padding: 18px;
+    }
+
+    .metric-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .metric-icon, .panel-icon {
+      display: inline-grid;
+      place-items: center;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
+      background: rgba(230, 57, 70, .12);
+      color: var(--accent-soft);
+      border: 1px solid rgba(230, 57, 70, .22);
+    }
+
+    .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+    }
+
+    .value {
+      font-size: clamp(32px, 4vw, 46px);
+      font-weight: 900;
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .positive { color: var(--positive); }
+    .negative { color: var(--accent-soft); }
+    .warning { color: var(--warning); }
+
+    .panel {
+      padding: 20px;
     }
 
     .chart-wrap {
-      height: 320px;
-      margin-top: 16px;
+      height: 430px;
+      margin-top: 18px;
+      padding: 8px 0 0;
     }
 
-    .type-list {
+    .type-list, .match-list {
       display: grid;
       gap: 12px;
       margin-top: 16px;
     }
 
-    .type-row {
-      background: var(--panel-soft);
+    .type-row, .match-row {
+      min-width: 0;
+      padding: 14px;
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 12px;
+      border-radius: 12px;
+      background: var(--card-soft);
+      transition: background .18s ease, border-color .18s ease;
     }
 
-    .type-top {
+    .type-row:hover, .match-row:hover {
+      background: rgba(230, 57, 70, .06);
+      border-color: rgba(230, 57, 70, .42);
+    }
+
+    .type-top, .match-top {
       display: flex;
+      align-items: center;
       justify-content: space-between;
       gap: 12px;
-      margin-bottom: 9px;
-      font-weight: 700;
+      margin-bottom: 10px;
+      font-weight: 800;
+    }
+
+    .match-row strong {
+      display: block;
+      overflow-wrap: anywhere;
+      line-height: 1.35;
     }
 
     .bar {
       width: 100%;
-      height: 8px;
+      height: 9px;
       overflow: hidden;
       border-radius: 999px;
-      background: #0e131a;
+      background: #0d0d0d;
+      border: 1px solid var(--border);
     }
 
     .bar > span {
       display: block;
-      height: 100%;
       min-width: 2px;
-      background: var(--blue);
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-soft));
     }
 
-    .table-panel { overflow: hidden; }
-    .stack { display: grid; gap: 16px; margin-bottom: 16px; }
-    .triple { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-bottom: 16px; }
-    .match-list { display: grid; gap: 10px; margin-top: 14px; }
-    .match-row {
-      display: grid;
-      gap: 5px;
-      padding: 12px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-soft);
-    }
-
-    .filters {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin: 14px 0;
-    }
-
-    input, select, button {
-      min-height: 38px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: #0e131a;
-      color: var(--text);
-      padding: 8px 10px;
-      font: inherit;
-    }
-
-    button {
-      cursor: pointer;
-      background: var(--blue);
-      color: #06101b;
-      font-weight: 700;
-      border-color: transparent;
-    }
-
-    .detail-box {
-      margin-top: 12px;
-      padding: 14px;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      background: var(--panel-soft);
-      min-height: 80px;
+    .table-panel {
+      padding: 0;
+      overflow: hidden;
     }
 
     .table-head {
       display: flex;
       align-items: center;
       justify-content: space-between;
-      gap: 12px;
-      padding: 18px;
+      gap: 14px;
+      padding: 20px;
       border-bottom: 1px solid var(--border);
+      background: rgba(26, 26, 26, .78);
     }
 
-    .table-scroll { overflow-x: auto; }
+    .table-scroll {
+      overflow-x: auto;
+    }
 
     table {
       width: 100%;
+      min-width: 900px;
       border-collapse: collapse;
-      min-width: 850px;
     }
 
     th, td {
-      padding: 13px 16px;
-      border-bottom: 1px solid var(--border);
+      padding: 14px 16px;
+      border-bottom: 1px solid rgba(34, 34, 34, .82);
       text-align: left;
-      vertical-align: top;
+      vertical-align: middle;
       font-size: 14px;
+      line-height: 1.35;
     }
 
     th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
       color: var(--muted);
-      background: #10161e;
-      font-size: 12px;
+      background: var(--card);
+      font-size: 11px;
+      font-weight: 900;
       text-transform: uppercase;
-      letter-spacing: .04em;
+      letter-spacing: .09em;
       white-space: nowrap;
     }
 
-    td.pick { max-width: 320px; line-height: 1.35; }
-    td.numeric { font-variant-numeric: tabular-nums; white-space: nowrap; }
-    .result { font-size: 18px; }
-    .pill {
+    tbody tr:nth-child(even) { background: rgba(255, 255, 255, .018); }
+    tbody tr:hover { background: rgba(230, 57, 70, .055); }
+
+    td.pick {
+      max-width: 380px;
+      overflow-wrap: anywhere;
+    }
+
+    .numeric {
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .badge {
       display: inline-flex;
       align-items: center;
-      min-height: 24px;
-      padding: 3px 8px;
-      border: 1px solid var(--border);
+      gap: 6px;
+      min-height: 26px;
+      padding: 4px 9px;
       border-radius: 999px;
-      background: var(--panel-soft);
+      border: 1px solid var(--border);
+      background: #111111;
       color: var(--muted);
       font-size: 12px;
+      font-weight: 800;
       white-space: nowrap;
     }
-    .empty { padding: 28px 18px; color: var(--muted); }
 
-    @media (max-width: 900px) {
-      .app-shell { grid-template-columns: 1fr; }
-      .sidebar { position: static; height: auto; }
-      .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      header { align-items: start; flex-direction: column; }
+    .badge::before {
+      content: "";
+      width: 7px;
+      height: 7px;
+      border-radius: 999px;
+      background: currentColor;
+    }
+
+    .badge.win, .badge.positive { color: var(--positive); border-color: rgba(0, 212, 170, .28); background: rgba(0, 212, 170, .08); }
+    .badge.loss, .badge.negative { color: var(--accent-soft); border-color: rgba(255, 107, 107, .28); background: rgba(230, 57, 70, .08); }
+    .badge.pending, .badge.warning { color: var(--warning); border-color: rgba(255, 209, 102, .28); background: rgba(255, 209, 102, .08); }
+    .badge.neutral { color: var(--muted); }
+
+    .empty {
+      padding: 28px 20px;
+      color: var(--muted);
+      line-height: 1.55;
+    }
+
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin: 16px 0;
+    }
+
+    input, select, button {
+      min-height: 42px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #101010;
+      color: var(--text);
+      padding: 9px 12px;
+      font: inherit;
+      transition: border-color .18s ease, background .18s ease, transform .18s ease;
+    }
+
+    input:focus, select:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(230, 57, 70, .14);
+    }
+
+    button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      cursor: pointer;
+      background: var(--accent);
+      color: var(--text);
+      font-weight: 850;
+      border-color: transparent;
+    }
+
+    button:hover {
+      background: #f04450;
+      transform: translateY(-1px);
+    }
+
+    .ghost-button {
+      background: #111111;
+      border-color: var(--border);
+      color: var(--muted);
+    }
+
+    .ghost-button:hover {
+      color: var(--text);
+      background: rgba(230, 57, 70, .12);
+    }
+
+    .detail-box {
+      min-height: 120px;
+      margin-top: 12px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: #111111;
+      overflow: hidden;
+    }
+
+    .player-card {
+      display: grid;
+      grid-template-columns: 92px minmax(0, 1fr);
+      gap: 16px;
+      align-items: start;
+    }
+
+    .player-photo {
+      width: 92px;
+      height: 92px;
+      border-radius: 18px;
+      border: 1px solid rgba(230, 57, 70, .36);
+      background:
+        linear-gradient(135deg, rgba(230, 57, 70, .34), rgba(255, 107, 107, .08)),
+        #151515;
+      display: grid;
+      place-items: center;
+      color: var(--text);
+      font-size: 34px;
+      font-weight: 900;
+      text-transform: uppercase;
+    }
+
+    .compact-metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .mini-card {
+      padding: 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--card-soft);
+      min-width: 0;
+    }
+
+    .mini-card .value {
+      margin-top: 6px;
+      font-size: 26px;
+    }
+
+    .spinner {
+      display: inline-grid;
+      place-items: center;
+      min-height: 80px;
+      width: 100%;
+      color: var(--muted);
+    }
+
+    .spinner::before {
+      content: "";
+      width: 28px;
+      height: 28px;
+      border-radius: 999px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      animation: spin .8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(10px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    @media (max-width: 1100px) {
       .summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .grid { grid-template-columns: 1fr; }
-      .triple { grid-template-columns: 1fr; }
-      .chart-wrap { height: 260px; }
+      .grid, .triple { grid-template-columns: 1fr; }
+      .chart-wrap { height: 360px; }
+    }
+
+    @media (max-width: 820px) {
+      .app-shell { grid-template-columns: 1fr; }
+      .sidebar {
+        position: static;
+        width: 100%;
+        height: auto;
+      }
+      .nav { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      main {
+        width: min(100% - 28px, 1360px);
+        padding-top: 24px;
+      }
+      .hero, .section-head, .table-head {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+      .status-chip { white-space: normal; }
     }
 
     @media (max-width: 560px) {
-      main { width: min(100% - 20px, 1180px); padding-top: 20px; }
-      .summary { grid-template-columns: 1fr; }
-      .value { font-size: 24px; }
+      .summary, .compact-metrics { grid-template-columns: 1fr; }
+      .player-card { grid-template-columns: 1fr; }
+      .player-photo { width: 76px; height: 76px; border-radius: 14px; }
+      .nav { grid-template-columns: 1fr; }
+      .chart-wrap { height: 300px; }
+      h1 { font-size: 36px; }
     }
   </style>
 </head>
 <body>
   <div class="app-shell">
-  <aside class="sidebar">
-    <div class="brand">
-      <strong>STATORA</strong>
-      <p class="muted">Sports intelligence</p>
-    </div>
-    <nav class="nav">
-      <a href="#overview">Overview</a>
-      <a href="#matches">Partidos</a>
-      <a href="#players">Player Explorer</a>
-      <a href="#teams">Equipos</a>
-      <a href="#predictions">Predicciones</a>
-      <a href="#bets">SQLite Bets</a>
-    </nav>
-  </aside>
-  <main>
-    <header id="overview">
-      <div>
-        <h1>EdgeBet Dashboard</h1>
-        <p class="muted">Historial, rendimiento y evolución de bankroll.</p>
+    <aside class="sidebar">
+      <div class="brand">
+        <strong>STATORA</strong>
+        <span>Sports intelligence</span>
       </div>
-      <p class="muted">{{ summary.total }} apuestas registradas</p>
-    </header>
+      <nav class="nav" aria-label="Secciones">
+        <a class="active" href="#overview">
+          <svg viewBox="0 0 24 24"><path d="M3 13h8V3H3v10Z"/><path d="M13 21h8V11h-8v10Z"/><path d="M13 3v6h8V3h-8Z"/><path d="M3 21h8v-6H3v6Z"/></svg>
+          Overview
+        </a>
+        <a href="#matches">
+          <svg viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 2v4"/><path d="M16 2v4"/><path d="M3 10h18"/></svg>
+          Partidos
+        </a>
+        <a href="#players">
+          <svg viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg>
+          Players
+        </a>
+        <a href="#teams">
+          <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Equipos
+        </a>
+        <a href="#predictions">
+          <svg viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          Modelos
+        </a>
+        <a href="#bets">
+          <svg viewBox="0 0 24 24"><path d="M12 1v22"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7H14a3.5 3.5 0 0 1 0 7H6"/></svg>
+          SQLite
+        </a>
+      </nav>
+    </aside>
 
-    <section class="summary">
-      <article class="card">
-        <div class="label">Balance total</div>
-        <div class="value {% if summary.total_profit >= 0 %}positive{% else %}negative{% endif %}">
-          {{ "%+.2f"|format(summary.total_profit) }}
+    <main>
+      <header id="overview" class="hero">
+        <div>
+          <div class="eyebrow">STATORA Command Center</div>
+          <h1>Dashboard operativo</h1>
+          <p class="hero-copy">Bankroll, datos PostgreSQL, performance de modelos, exploración de jugadores y monitoreo de value bets en una vista profesional.</p>
         </div>
-        <div class="sub">Ganancia/pérdida neta cerrada</div>
-      </article>
-      <article class="card">
-        <div class="label">% de acierto</div>
-        <div class="value">{{ "%.1f"|format(summary.win_rate) }}%</div>
-        <div class="sub">Sobre apuestas ganadas/perdidas</div>
-      </article>
-      <article class="card">
-        <div class="label">Apuestas</div>
-        <div class="value">{{ summary.total }}</div>
-        <div class="sub">✅ {{ summary.won }} ganadas · ❌ {{ summary.lost }} perdidas · ⏳ {{ summary.pending }} pendientes</div>
-      </article>
-      <article class="card">
-        <div class="label">Racha actual</div>
-        <div class="value">{{ summary.streak }}</div>
-        <div class="sub">Calculada desde la última apuesta cerrada</div>
-      </article>
-    </section>
+        <div class="status-chip">{{ summary.total }} apuestas registradas</div>
+      </header>
 
-    <section class="grid">
-      <article class="panel">
-        <h2>Bankroll</h2>
-        <p class="muted">Evolución del balance acumulado.</p>
-        <div class="chart-wrap">
-          <canvas id="bankrollChart"></canvas>
-        </div>
-      </article>
+      <section class="summary" aria-label="Resumen SQLite">
+        <article class="metric-card">
+          <div class="metric-top">
+            <div class="label">Balance total</div>
+            <div class="metric-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg></div>
+          </div>
+          <div class="value {% if summary.total_profit >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(summary.total_profit) }}</div>
+          <p class="sub">Ganancia o pérdida neta cerrada</p>
+        </article>
+        <article class="metric-card">
+          <div class="metric-top">
+            <div class="label">Hit rate</div>
+            <div class="metric-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></div>
+          </div>
+          <div class="value">{{ "%.1f"|format(summary.win_rate) }}%</div>
+          <p class="sub">Sobre apuestas ganadas y perdidas</p>
+        </article>
+        <article class="metric-card">
+          <div class="metric-top">
+            <div class="label">Apuestas</div>
+            <div class="metric-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h10"/></svg></div>
+          </div>
+          <div class="value">{{ summary.total }}</div>
+          <p class="sub">{{ summary.won }} ganadas · {{ summary.lost }} perdidas · {{ summary.pending }} pendientes</p>
+        </article>
+        <article class="metric-card">
+          <div class="metric-top">
+            <div class="label">Racha actual</div>
+            <div class="metric-icon"><svg class="icon" viewBox="0 0 24 24"><path d="m3 17 6-6 4 4 8-8"/><path d="M14 7h7v7"/></svg></div>
+          </div>
+          <div class="value" style="font-size:32px">{{ summary.streak }}</div>
+          <p class="sub">Desde la última apuesta cerrada</p>
+        </article>
+      </section>
 
-      <article class="panel">
-        <h2>Estadísticas por tipo</h2>
-        <div class="type-list">
-          {% for key, item in category_stats.items() %}
-          <div class="type-row">
-            <div class="type-top">
-              <span>{{ item.label }}</span>
-              <span>{{ "%.1f"|format(item.rate) }}%</span>
+      <section class="section grid">
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 14l3-3 3 2 5-6"/></svg></span>
+            <div>
+              <h2>Bankroll</h2>
+              <p class="muted">Evolución del balance acumulado</p>
             </div>
-            <div class="bar"><span style="width: {{ item.rate }}%"></span></div>
-            <div class="sub">✅ {{ item.won }} · ❌ {{ item.lost }} · Total {{ item.total }}</div>
           </div>
-          {% endfor %}
-        </div>
-      </article>
-    </section>
-
-    <div class="section-title">
-      <h2>PostgreSQL Platform</h2>
-      <p class="muted">
-        {% if postgres_stats.available %}
-          Datos reales acumulados por collectors, modelos y evaluation engine.
-        {% else %}
-          PostgreSQL no disponible: {{ postgres_stats.error or "DATABASE_URL no configurado" }}.
-        {% endif %}
-      </p>
-    </div>
-
-    <section class="summary">
-      <article class="card">
-        <div class="label">Fixtures guardados</div>
-        <div class="value">{{ postgres_stats.fixtures or 0 }}</div>
-        <div class="sub">Partidos en PostgreSQL</div>
-      </article>
-      <article class="card">
-        <div class="label">Partidos con stats</div>
-        <div class="value">{{ postgres_stats.fixtures_with_stats or 0 }}</div>
-        <div class="sub">Fixtures con team_stats</div>
-      </article>
-      <article class="card">
-        <div class="label">Predicciones totales</div>
-        <div class="value">{{ postgres_stats.predictions_total or 0 }}</div>
-        <div class="sub">Todas las predicciones guardadas</div>
-      </article>
-      <article class="card">
-        <div class="label">Predicciones settled</div>
-        <div class="value">{{ postgres_stats.predictions_settled or 0 }}</div>
-        <div class="sub">Evaluadas contra resultado real</div>
-      </article>
-    </section>
-
-    <section id="matches" class="triple">
-      <article class="panel">
-        <h2>Partidos del día</h2>
-        <div class="match-list">
-          {% for match in dashboard_matches.today %}
-          <div class="match-row">
-            <strong>{{ match.home_team }} vs {{ match.away_team }}</strong>
-            <span class="muted">{{ match.league or "No disponible" }} · {{ match.status or "No disponible" }}</span>
-            <span>{{ match.result or "No disponible" }}</span>
+          <div class="chart-wrap">
+            <canvas id="bankrollChart"></canvas>
           </div>
-          {% else %}
-          <p class="empty">No hay partidos del día guardados.</p>
-          {% endfor %}
-        </div>
-      </article>
-      <article class="panel">
-        <h2>Próximos partidos</h2>
-        <div class="match-list">
-          {% for match in dashboard_matches.upcoming %}
-          <div class="match-row">
-            <strong>{{ match.home_team }} vs {{ match.away_team }}</strong>
-            <span class="muted">{{ match.league or "No disponible" }} · {{ match.date or "No disponible" }}</span>
-            <span>{% if match.has_predictions %}Con predicción{% else %}Sin predicción{% endif %}</span>
+        </article>
+
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M8 19V9"/><path d="M12 19V3"/><path d="M16 19v-7"/><path d="M20 19V8"/></svg></span>
+            <div>
+              <h2>Stats por tipo</h2>
+              <p class="muted">Acierto por categoría SQLite</p>
+            </div>
           </div>
-          {% else %}
-          <p class="empty">No hay próximos partidos guardados.</p>
-          {% endfor %}
-        </div>
-      </article>
-      <article class="panel">
-        <h2>Finalizados</h2>
-        <div class="match-list">
-          {% for match in dashboard_matches.finished %}
-          <div class="match-row">
-            <strong>{{ match.home_team }} {{ match.result or "" }} {{ match.away_team }}</strong>
-            <span class="muted">{{ match.league or "No disponible" }} · stats: {% if match.has_stats %}sí{% else %}no{% endif %}</span>
-            <span>{% if match.has_predictions %}Con predicción{% else %}Sin predicción{% endif %}</span>
+          <div class="type-list">
+            {% for key, item in category_stats.items() %}
+            <div class="type-row">
+              <div class="type-top">
+                <span>{{ item.label }}</span>
+                <span>{{ "%.1f"|format(item.rate) }}%</span>
+              </div>
+              <div class="bar"><span style="width: {{ item.rate }}%"></span></div>
+              <p class="sub">{{ item.won }} ganadas · {{ item.lost }} perdidas · {{ item.total }} total</p>
+            </div>
+            {% endfor %}
           </div>
-          {% else %}
-          <p class="empty">No hay partidos finalizados guardados.</p>
-          {% endfor %}
+        </article>
+      </section>
+
+      <section class="section">
+        <div class="section-head">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 1.7 4 3 9 3s9-1.3 9-3V5"/><path d="M3 12c0 1.7 4 3 9 3s9-1.3 9-3"/></svg></span>
+            <div>
+              <h2>PostgreSQL Platform</h2>
+              <p class="muted">
+                {% if postgres_stats.available %}
+                  Collectors, modelos y evaluation engine
+                {% else %}
+                  PostgreSQL no disponible: {{ postgres_stats.error or "DATABASE_URL no configurado" }}
+                {% endif %}
+              </p>
+            </div>
+          </div>
         </div>
-      </article>
-    </section>
 
-    <section class="panel table-panel">
-      <div class="table-head">
-        <h2>Todos los partidos</h2>
-        <p class="muted">Filtros contra /api/matches</p>
-      </div>
-      <div class="filters">
-        <input id="matchDate" type="date" aria-label="Fecha">
-        <input id="matchLeague" placeholder="Liga">
-        <input id="matchTeam" placeholder="Equipo">
-        <select id="matchStatus">
-          <option value="">Estado</option>
-          <option value="NS">NS</option>
-          <option value="FT">FT</option>
-          <option value="AET">AET</option>
-          <option value="PEN">PEN</option>
-        </select>
-        <select id="matchHasPrediction">
-          <option value="">Predicción</option>
-          <option value="true">Con predicción</option>
-          <option value="false">Sin predicción</option>
-        </select>
-        <button type="button" onclick="loadMatches()">Filtrar</button>
-      </div>
-      <div id="matchesResult" class="detail-box">Usá los filtros para cargar partidos.</div>
-    </section>
-
-    <section id="players" class="grid">
-      <article class="panel">
-        <h2>Player Explorer</h2>
-        <p class="muted">Buscá jugadores cargados en PostgreSQL.</p>
-        <div class="filters">
-          <input id="playerQuery" placeholder="Nombre del jugador">
-          <button type="button" onclick="searchPlayers()">Buscar</button>
+        <div class="summary">
+          <article class="metric-card">
+            <div class="label">Fixtures guardados</div>
+            <div class="value">{{ postgres_stats.fixtures or 0 }}</div>
+            <p class="sub">Partidos persistidos</p>
+          </article>
+          <article class="metric-card">
+            <div class="label">Partidos con stats</div>
+            <div class="value">{{ postgres_stats.fixtures_with_stats or 0 }}</div>
+            <p class="sub">Fixtures con team_stats</p>
+          </article>
+          <article class="metric-card">
+            <div class="label">Predicciones</div>
+            <div class="value">{{ postgres_stats.predictions_total or 0 }}</div>
+            <p class="sub">Total generado</p>
+          </article>
+          <article class="metric-card">
+            <div class="label">Settled</div>
+            <div class="value">{{ postgres_stats.predictions_settled or 0 }}</div>
+            <p class="sub">Evaluadas contra resultado</p>
+          </article>
         </div>
-        <div id="playerResults" class="detail-box">Sin búsqueda activa.</div>
-      </article>
-      <article class="panel">
-        <h2>Ficha del jugador</h2>
-        <div id="playerDetail" class="detail-box">Seleccioná un jugador para ver su ficha y últimos 7 partidos.</div>
-      </article>
-    </section>
+      </section>
 
-    <section id="teams" class="grid">
-      <article class="panel">
-        <h2>Equipos</h2>
-        <p class="muted">Buscador de equipos, plantel, forma y predicciones asociadas.</p>
-        <div class="filters">
-          <input id="teamQuery" placeholder="Nombre del equipo">
-          <button type="button" onclick="searchTeams()">Buscar</button>
-        </div>
-        <div id="teamResults" class="detail-box">Sin búsqueda activa.</div>
-      </article>
-      <article class="panel">
-        <h2>Perfil de equipo</h2>
-        <div id="teamDetail" class="detail-box">Seleccioná un equipo para ver su perfil.</div>
-      </article>
-    </section>
+      <section id="matches" class="section triple">
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M8 2v4"/><path d="M16 2v4"/><path d="M3 10h18"/><rect x="3" y="4" width="18" height="18" rx="2"/></svg></span>
+            <h2>Partidos del día</h2>
+          </div>
+          <div class="match-list">
+            {% for match in dashboard_matches.today %}
+            <div class="match-row">
+              <div class="match-top"><strong>{{ match.home_team }} vs {{ match.away_team }}</strong><span class="badge neutral">{{ match.status or "N/D" }}</span></div>
+              <p class="sub">{{ match.league or "No disponible" }} · {{ match.date|date_es }}</p>
+              <p>{{ match.result or "Sin resultado" }}</p>
+            </div>
+            {% else %}
+            <p class="empty">No hay partidos del día guardados.</p>
+            {% endfor %}
+          </div>
+        </article>
 
-    <section id="predictions" class="stack">
-      <article class="panel table-panel">
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="9"/></svg></span>
+            <h2>Próximos</h2>
+          </div>
+          <div class="match-list">
+            {% for match in dashboard_matches.upcoming %}
+            <div class="match-row">
+              <div class="match-top"><strong>{{ match.home_team }} vs {{ match.away_team }}</strong><span class="badge {% if match.has_predictions %}positive{% else %}neutral{% endif %}">{% if match.has_predictions %}Con predicción{% else %}Sin predicción{% endif %}</span></div>
+              <p class="sub">{{ match.league or "No disponible" }} · {{ match.date|date_es }}</p>
+              <p>{{ match.status or "Programado" }}</p>
+            </div>
+            {% else %}
+            <p class="empty">No hay próximos partidos guardados.</p>
+            {% endfor %}
+          </div>
+        </article>
+
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></svg></span>
+            <h2>Finalizados</h2>
+          </div>
+          <div class="match-list">
+            {% for match in dashboard_matches.finished %}
+            <div class="match-row">
+              <div class="match-top"><strong>{{ match.home_team }} {{ match.result or "" }} {{ match.away_team }}</strong><span class="badge {% if match.has_stats %}positive{% else %}neutral{% endif %}">Stats {% if match.has_stats %}sí{% else %}no{% endif %}</span></div>
+              <p class="sub">{{ match.league or "No disponible" }} · {{ match.date|date_es }}</p>
+              <p>{% if match.has_predictions %}Con predicción{% else %}Sin predicción{% endif %}</p>
+            </div>
+            {% else %}
+            <p class="empty">No hay partidos finalizados guardados.</p>
+            {% endfor %}
+          </div>
+        </article>
+      </section>
+
+      <section class="section panel table-panel">
         <div class="table-head">
-          <h2>Performance de modelos</h2>
-          <p class="muted">Tabla model_performance de PostgreSQL</p>
+          <div>
+            <h2>Todos los partidos</h2>
+            <p class="muted">Filtros contra /api/matches</p>
+          </div>
         </div>
-        {% if model_performance %}
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Modelo</th>
-                <th>Mercado</th>
-                <th>Liga</th>
-                <th>Hit rate</th>
-                <th>ROI</th>
-                <th>Yield</th>
-                <th>Brier</th>
-                <th>Log Loss</th>
-                <th>Picks</th>
-                <th>Mejor liga</th>
-                <th>Mejor mercado</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for perf in model_performance %}
-              <tr>
-                <td>{{ perf.model_name }}</td>
-                <td><span class="pill">{{ perf.market or "N/D" }}</span></td>
-                <td>{{ perf.league or "N/D" }}</td>
-                <td class="numeric">{{ "%.1f"|format((perf.hit_rate or 0) * 100) }}%</td>
-                <td class="numeric {% if (perf.roi or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.roi or 0) }}</td>
-                <td class="numeric {% if (perf.yield_rate or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.yield_rate or 0) }}</td>
-                <td class="numeric">{{ "%.4f"|format(perf.brier_score or 0) }}</td>
-                <td class="numeric">{{ "%.4f"|format(perf.log_loss or 0) }}</td>
-                <td class="numeric">{{ perf.total_picks }}</td>
-                <td><span class="pill">{{ perf.best_league or "N/D" }}</span></td>
-                <td><span class="pill">{{ perf.best_market or "N/D" }}</span></td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
+        <div style="padding: 0 20px 20px">
+          <div class="filters">
+            <input id="matchDate" type="date" aria-label="Fecha">
+            <input id="matchLeague" placeholder="Liga">
+            <input id="matchTeam" placeholder="Equipo">
+            <select id="matchStatus">
+              <option value="">Estado</option>
+              <option value="NS">NS</option>
+              <option value="FT">FT</option>
+              <option value="AET">AET</option>
+              <option value="PEN">PEN</option>
+            </select>
+            <select id="matchHasPrediction">
+              <option value="">Predicción</option>
+              <option value="true">Con predicción</option>
+              <option value="false">Sin predicción</option>
+            </select>
+            <button type="button" onclick="loadMatches()">Filtrar</button>
+          </div>
+          <div id="matchesResult" class="detail-box">Usá los filtros para cargar partidos.</div>
         </div>
-        {% else %}
-        <div class="empty">El modelo está acumulando datos. Las métricas aparecerán cuando haya suficientes partidos evaluados.</div>
-        {% endif %}
-      </article>
+      </section>
 
-      <article class="panel table-panel">
-        <div class="table-head">
-          <h2>Hit rate y ROI por mercado</h2>
-          <p class="muted">Agrupado por modelo</p>
-        </div>
-        {% if computed_model_performance %}
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Modelo</th>
-                <th>Mercado</th>
-                <th>Hit rate</th>
-                <th>ROI</th>
-                <th>Yield</th>
-                <th>Picks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for perf in computed_model_performance %}
-                {% for market in perf.markets %}
+      <section id="players" class="section grid">
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M20 21a8 8 0 0 0-16 0"/><circle cx="12" cy="7" r="4"/></svg></span>
+            <div>
+              <h2>Player Explorer</h2>
+              <p class="muted">Jugadores cargados en PostgreSQL</p>
+            </div>
+          </div>
+          <div class="filters">
+            <input id="playerQuery" placeholder="Nombre del jugador">
+            <button type="button" onclick="searchPlayers()">Buscar</button>
+          </div>
+          <div id="playerResults" class="detail-box">Sin búsqueda activa.</div>
+        </article>
+
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8"/><path d="M8 17h5"/></svg></span>
+            <h2>Ficha del jugador</h2>
+          </div>
+          <div id="playerDetail" class="detail-box">Seleccioná un jugador para ver su ficha y últimos 7 partidos.</div>
+        </article>
+      </section>
+
+      <section id="teams" class="section grid">
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/></svg></span>
+            <div>
+              <h2>Equipos</h2>
+              <p class="muted">Plantel, forma y predicciones asociadas</p>
+            </div>
+          </div>
+          <div class="filters">
+            <input id="teamQuery" placeholder="Nombre del equipo">
+            <button type="button" onclick="searchTeams()">Buscar</button>
+          </div>
+          <div id="teamResults" class="detail-box">Sin búsqueda activa.</div>
+        </article>
+
+        <article class="panel">
+          <div class="section-title">
+            <span class="panel-icon"><svg class="icon" viewBox="0 0 24 24"><path d="M4 4h16v16H4z"/><path d="M8 4v16"/><path d="M16 4v16"/><path d="M4 12h16"/></svg></span>
+            <h2>Perfil de equipo</h2>
+          </div>
+          <div id="teamDetail" class="detail-box">Seleccioná un equipo para ver su perfil.</div>
+        </article>
+      </section>
+
+      <section id="predictions" class="section stack">
+        <article class="panel table-panel">
+          <div class="table-head">
+            <div>
+              <h2>Performance de modelos</h2>
+              <p class="muted">Tabla model_performance de PostgreSQL</p>
+            </div>
+          </div>
+          {% if model_performance %}
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Modelo</th>
+                  <th>Mercado</th>
+                  <th>Liga</th>
+                  <th>Hit rate</th>
+                  <th>ROI</th>
+                  <th>Yield</th>
+                  <th>Brier</th>
+                  <th>Log Loss</th>
+                  <th>Picks</th>
+                  <th>Mejor liga</th>
+                  <th>Mejor mercado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for perf in model_performance %}
                 <tr>
                   <td>{{ perf.model_name }}</td>
-                  <td><span class="pill">{{ market.market }}</span></td>
-                  <td class="numeric">{{ "%.1f"|format((market.hit_rate or 0) * 100) }}%</td>
-                  <td class="numeric {% if (market.roi or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(market.roi or 0) }}</td>
-                  <td class="numeric {% if (market.yield_rate or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(market.yield_rate or 0) }}</td>
-                  <td class="numeric">{{ market.total_picks }}</td>
+                  <td><span class="badge neutral">{{ perf.market or "N/D" }}</span></td>
+                  <td>{{ perf.league or "N/D" }}</td>
+                  <td class="numeric">{{ "%.1f"|format((perf.hit_rate or 0) * 100) }}%</td>
+                  <td class="numeric {% if (perf.roi or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.roi or 0) }}</td>
+                  <td class="numeric {% if (perf.yield_rate or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(perf.yield_rate or 0) }}</td>
+                  <td class="numeric">{{ "%.4f"|format(perf.brier_score or 0) }}</td>
+                  <td class="numeric">{{ "%.4f"|format(perf.log_loss or 0) }}</td>
+                  <td class="numeric">{{ perf.total_picks }}</td>
+                  <td><span class="badge neutral">{{ perf.best_league or "N/D" }}</span></td>
+                  <td><span class="badge neutral">{{ perf.best_market or "N/D" }}</span></td>
                 </tr>
                 {% endfor %}
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="empty">El modelo está acumulando datos. Las métricas aparecerán cuando haya suficientes partidos evaluados.</div>
-        {% endif %}
-      </article>
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty">El modelo está acumulando datos. Las métricas aparecerán cuando haya suficientes partidos evaluados.</div>
+          {% endif %}
+        </article>
 
-      <article class="panel table-panel">
+        <article class="panel table-panel">
+          <div class="table-head">
+            <div>
+              <h2>Hit rate y ROI por mercado</h2>
+              <p class="muted">Agrupado por modelo</p>
+            </div>
+          </div>
+          {% if computed_model_performance %}
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Modelo</th>
+                  <th>Mercado</th>
+                  <th>Hit rate</th>
+                  <th>ROI</th>
+                  <th>Yield</th>
+                  <th>Picks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for perf in computed_model_performance %}
+                  {% for market in perf.markets %}
+                  <tr>
+                    <td>{{ perf.model_name }}</td>
+                    <td><span class="badge neutral">{{ market.market }}</span></td>
+                    <td class="numeric">{{ "%.1f"|format((market.hit_rate or 0) * 100) }}%</td>
+                    <td class="numeric {% if (market.roi or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(market.roi or 0) }}</td>
+                    <td class="numeric {% if (market.yield_rate or 0) >= 0 %}positive{% else %}negative{% endif %}">{{ "%+.2f"|format(market.yield_rate or 0) }}</td>
+                    <td class="numeric">{{ market.total_picks }}</td>
+                  </tr>
+                  {% endfor %}
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty">El modelo está acumulando datos. Las métricas aparecerán cuando haya suficientes partidos evaluados.</div>
+          {% endif %}
+        </article>
+
+        <article class="panel table-panel">
+          <div class="table-head">
+            <div>
+              <h2>Value bets detectados</h2>
+              <p class="muted">
+                Hit rate:
+                {% if value_bet_performance.available %}
+                  {{ "%.1f"|format((value_bet_performance.value_bets.hit_rate or 0) * 100) }}%
+                {% else %}
+                  N/D
+                {% endif %}
+              </p>
+            </div>
+          </div>
+          {% if value_bets %}
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Modelo</th>
+                  <th>Mercado</th>
+                  <th>Prob.</th>
+                  <th>Cuota</th>
+                  <th>Value</th>
+                  <th>Resultado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for pick in value_bets %}
+                <tr>
+                  <td class="numeric">{{ pick.predicted_at|datetime_es }}</td>
+                  <td>{{ pick.model_name }}</td>
+                  <td><span class="badge neutral">{{ pick.market or "N/D" }}</span></td>
+                  <td class="numeric">{{ "%.1f"|format((pick.probability or 0) * 100) }}%</td>
+                  <td class="numeric">{% if pick.real_odds %}@{{ "%.2f"|format(pick.real_odds) }}{% else %}N/D{% endif %}</td>
+                  <td class="numeric positive">{{ "%+.3f"|format(pick.value_score or 0) }}</td>
+                  <td>
+                    {% if pick.correct is sameas true %}
+                      <span class="badge win">Ganado</span>
+                    {% elif pick.correct is sameas false %}
+                      <span class="badge loss">Perdido</span>
+                    {% else %}
+                      <span class="badge pending">Pendiente</span>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty">Sin value bets detectados aún.</div>
+          {% endif %}
+        </article>
+
+        <article class="panel table-panel">
+          <div class="table-head">
+            <div>
+              <h2>Últimas predicciones</h2>
+              <p class="muted">Últimas 50 generadas por el motor</p>
+            </div>
+          </div>
+          {% if recent_predictions %}
+          <div class="table-scroll">
+            <table>
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Modelo</th>
+                  <th>Liga</th>
+                  <th>Mercado</th>
+                  <th>Prob.</th>
+                  <th>Cuota</th>
+                  <th>Value</th>
+                  <th>Resultado</th>
+                  <th>Profit</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for prediction in recent_predictions %}
+                <tr>
+                  <td class="numeric">{{ prediction.predicted_at|datetime_es }}</td>
+                  <td>{{ prediction.model_name }}</td>
+                  <td>{{ prediction.league or "N/D" }}</td>
+                  <td><span class="badge neutral">{{ prediction.market or "N/D" }}</span></td>
+                  <td class="numeric">{{ "%.1f"|format((prediction.probability or 0) * 100) }}%</td>
+                  <td class="numeric">{% if prediction.real_odds %}@{{ "%.2f"|format(prediction.real_odds) }}{% else %}N/D{% endif %}</td>
+                  <td class="numeric {% if (prediction.value_score or 0) > 0 %}positive{% endif %}">{{ "%+.3f"|format(prediction.value_score or 0) }}</td>
+                  <td>
+                    {% if prediction.correct is sameas true %}
+                      <span class="badge win">Ganado</span>
+                    {% elif prediction.correct is sameas false %}
+                      <span class="badge loss">Perdido</span>
+                    {% else %}
+                      <span class="badge pending">Pendiente</span>
+                    {% endif %}
+                  </td>
+                  <td class="numeric {% if prediction.profit is not none and prediction.profit >= 0 %}positive{% elif prediction.profit is not none %}negative{% endif %}">
+                    {% if prediction.profit is none %}-{% else %}{{ "%+.2f"|format(prediction.profit) }}{% endif %}
+                  </td>
+                </tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+          {% else %}
+          <div class="empty">Sin predicciones evaluadas aún.</div>
+          {% endif %}
+        </article>
+      </section>
+
+      <section id="bets" class="section panel table-panel">
         <div class="table-head">
-          <h2>Value bets detectados</h2>
-          <p class="muted">
-            Hit rate:
-            {% if value_bet_performance.available %}
-              {{ "%.1f"|format((value_bet_performance.value_bets.hit_rate or 0) * 100) }}%
-            {% else %}
-              N/D
-            {% endif %}
-          </p>
+          <div>
+            <h2>Historial SQLite</h2>
+            <p class="muted">Sección existente, siempre visible</p>
+          </div>
         </div>
-        {% if value_bets %}
+        {% if bets %}
         <div class="table-scroll">
           <table>
             <thead>
               <tr>
                 <th>Fecha</th>
-                <th>Modelo</th>
-                <th>Mercado</th>
-                <th>Prob.</th>
+                <th>Partido</th>
+                <th>Pick</th>
+                <th>Monto</th>
                 <th>Cuota</th>
-                <th>Value</th>
                 <th>Resultado</th>
+                <th>Ganancia/Pérdida</th>
               </tr>
             </thead>
             <tbody>
-              {% for pick in value_bets %}
+              {% for bet in bets %}
               <tr>
-                <td class="numeric">{{ pick.predicted_at or "N/D" }}</td>
-                <td>{{ pick.model_name }}</td>
-                <td><span class="pill">{{ pick.market or "N/D" }}</span></td>
-                <td class="numeric">{{ "%.1f"|format((pick.probability or 0) * 100) }}%</td>
-                <td class="numeric">{% if pick.real_odds %}@{{ "%.2f"|format(pick.real_odds) }}{% else %}N/D{% endif %}</td>
-                <td class="numeric positive">{{ "%+.3f"|format(pick.value_score or 0) }}</td>
+                <td class="numeric">{{ bet.date_label }}</td>
+                <td>{{ bet.match_label }}</td>
+                <td class="pick">{{ bet.pick or "N/D" }}</td>
+                <td class="numeric">{{ "%.2f"|format(bet.stake or 0) }}</td>
+                <td class="numeric">{{ "%.2f"|format(bet.odds or 0) }}</td>
                 <td>
-                  {% if pick.correct is sameas true %}
-                    <span class="positive">Correcta</span>
-                  {% elif pick.correct is sameas false %}
-                    <span class="negative">Incorrecta</span>
+                  {% if bet.result == "ganada" %}
+                    <span class="badge win">Ganada</span>
+                  {% elif bet.result == "perdida" %}
+                    <span class="badge loss">Perdida</span>
                   {% else %}
-                    <span class="muted">Pendiente</span>
+                    <span class="badge pending">Pendiente</span>
                   {% endif %}
+                </td>
+                <td class="numeric {% if bet.profit_value is not none and bet.profit_value >= 0 %}positive{% elif bet.profit_value is not none %}negative{% endif %}">
+                  {% if bet.profit_value is none %}-{% else %}{{ "%+.2f"|format(bet.profit_value) }}{% endif %}
                 </td>
               </tr>
               {% endfor %}
@@ -650,111 +1161,25 @@
           </table>
         </div>
         {% else %}
-        <div class="empty">Sin value bets detectados aún.</div>
+        <div class="empty">Todavía no hay apuestas registradas.</div>
         {% endif %}
-      </article>
-
-      <article class="panel table-panel">
-        <div class="table-head">
-          <h2>Últimas predicciones</h2>
-          <p class="muted">Últimas 50 generadas por el motor</p>
-        </div>
-        {% if recent_predictions %}
-        <div class="table-scroll">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Modelo</th>
-                <th>Liga</th>
-                <th>Mercado</th>
-                <th>Prob.</th>
-                <th>Cuota</th>
-                <th>Value</th>
-                <th>Resultado</th>
-                <th>Profit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for prediction in recent_predictions %}
-              <tr>
-                <td class="numeric">{{ prediction.predicted_at or "N/D" }}</td>
-                <td>{{ prediction.model_name }}</td>
-                <td>{{ prediction.league or "N/D" }}</td>
-                <td><span class="pill">{{ prediction.market or "N/D" }}</span></td>
-                <td class="numeric">{{ "%.1f"|format((prediction.probability or 0) * 100) }}%</td>
-                <td class="numeric">{% if prediction.real_odds %}@{{ "%.2f"|format(prediction.real_odds) }}{% else %}N/D{% endif %}</td>
-                <td class="numeric {% if (prediction.value_score or 0) > 0 %}positive{% endif %}">{{ "%+.3f"|format(prediction.value_score or 0) }}</td>
-                <td>
-                  {% if prediction.correct is sameas true %}
-                    <span class="positive">Correcta</span>
-                  {% elif prediction.correct is sameas false %}
-                    <span class="negative">Incorrecta</span>
-                  {% else %}
-                    <span class="muted">Pendiente</span>
-                  {% endif %}
-                </td>
-                <td class="numeric {% if prediction.profit is not none and prediction.profit >= 0 %}positive{% elif prediction.profit is not none %}negative{% endif %}">
-                  {% if prediction.profit is none %}-{% else %}{{ "%+.2f"|format(prediction.profit) }}{% endif %}
-                </td>
-              </tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
-        {% else %}
-        <div class="empty">Sin predicciones evaluadas aún.</div>
-        {% endif %}
-      </article>
-    </section>
-
-    <section id="bets" class="panel table-panel">
-      <div class="table-head">
-        <h2>Tabla de apuestas</h2>
-        <p class="muted">Más recientes primero</p>
-      </div>
-      {% if bets %}
-      <div class="table-scroll">
-        <table>
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Partido</th>
-              <th>Pick</th>
-              <th>Monto</th>
-              <th>Cuota</th>
-              <th>Resultado</th>
-              <th>Ganancia/Pérdida</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for bet in bets %}
-            <tr>
-              <td class="numeric">{{ bet.date_label }}</td>
-              <td>{{ bet.match_label }}</td>
-              <td class="pick">{{ bet.pick or "N/D" }}</td>
-              <td class="numeric">{{ "%.2f"|format(bet.stake or 0) }}</td>
-              <td class="numeric">{{ "%.2f"|format(bet.odds or 0) }}</td>
-              <td class="result">{{ bet.result_label }}</td>
-              <td class="numeric {% if bet.profit_value is not none and bet.profit_value >= 0 %}positive{% elif bet.profit_value is not none %}negative{% endif %}">
-                {% if bet.profit_value is none %}-{% else %}{{ "%+.2f"|format(bet.profit_value) }}{% endif %}
-              </td>
-            </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-      {% else %}
-      <div class="empty">Todavía no hay apuestas registradas.</div>
-      {% endif %}
-    </section>
-  </main>
+      </section>
+    </main>
   </div>
 
   <script>
     const labels = {{ chart_labels | safe }};
     const values = {{ chart_values | safe }};
     const ctx = document.getElementById('bankrollChart');
+    const dateFormatter = new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'short', year: 'numeric' });
+    const dateTimeFormatter = new Intl.DateTimeFormat('es-AR', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    function formatDate(value, withTime = false) {
+      if (!value) return 'N/D';
+      const date = new Date(value);
+      if (Number.isNaN(date.getTime())) return 'N/D';
+      return withTime ? dateTimeFormatter.format(date).replace('.', '') : dateFormatter.format(date).replace('.', '');
+    }
 
     new Chart(ctx, {
       type: 'line',
@@ -763,13 +1188,16 @@
         datasets: [{
           label: 'Balance',
           data: values,
-          borderColor: '#3ddc97',
-          backgroundColor: 'rgba(61, 220, 151, 0.12)',
+          borderColor: '#e63946',
+          backgroundColor: 'rgba(230, 57, 70, 0.14)',
           borderWidth: 3,
           pointRadius: 3,
-          pointHoverRadius: 5,
+          pointHoverRadius: 6,
+          pointBackgroundColor: '#ffffff',
+          pointBorderColor: '#e63946',
+          pointBorderWidth: 2,
           fill: true,
-          tension: 0.32
+          tension: 0.35
         }]
       },
       options: {
@@ -779,21 +1207,23 @@
         plugins: {
           legend: { display: false },
           tooltip: {
-            backgroundColor: '#121820',
-            borderColor: '#263241',
+            backgroundColor: '#111111',
+            borderColor: '#e63946',
             borderWidth: 1,
-            titleColor: '#edf2f7',
-            bodyColor: '#edf2f7'
+            titleColor: '#ffffff',
+            bodyColor: '#ffffff',
+            padding: 12,
+            displayColors: false
           }
         },
         scales: {
           x: {
-            grid: { color: 'rgba(142, 160, 181, 0.12)' },
-            ticks: { color: '#8ea0b5' }
+            grid: { color: 'rgba(255, 255, 255, 0.05)' },
+            ticks: { color: '#888888', maxRotation: 0 }
           },
           y: {
-            grid: { color: 'rgba(142, 160, 181, 0.12)' },
-            ticks: { color: '#8ea0b5' }
+            grid: { color: 'rgba(255, 255, 255, 0.06)' },
+            ticks: { color: '#888888' }
           }
         }
       }
@@ -801,6 +1231,7 @@
 
     const na = (value) => value === null || value === undefined || value === '' ? 'No disponible' : value;
     const pct = (value) => value === null || value === undefined ? 'No disponible' : `${(value * 100).toFixed(1)}%`;
+    const loading = () => '<div class="spinner" aria-label="Cargando"></div>';
 
     async function fetchJson(url) {
       const response = await fetch(url);
@@ -811,6 +1242,12 @@
     function table(headers, rows) {
       if (!rows.length) return '<p class="empty">No disponible</p>';
       return `<div class="table-scroll"><table><thead><tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr></thead><tbody>${rows.join('')}</tbody></table></div>`;
+    }
+
+    function statusBadge(value) {
+      if (value === true || value === 'Ganado' || value === 'Correcta') return '<span class="badge win">Ganado</span>';
+      if (value === false || value === 'Perdido' || value === 'Incorrecta') return '<span class="badge loss">Perdido</span>';
+      return '<span class="badge pending">Pendiente</span>';
     }
 
     async function loadMatches() {
@@ -827,7 +1264,7 @@
       if (hasPrediction) params.set('has_prediction', hasPrediction);
       params.set('limit', '50');
       const target = document.getElementById('matchesResult');
-      target.textContent = 'Cargando...';
+      target.innerHTML = loading();
       try {
         const data = await fetchJson(`/api/matches?${params.toString()}`);
         if (!data.available) {
@@ -837,13 +1274,13 @@
         target.innerHTML = table(
           ['Fecha', 'Liga', 'Partido', 'Estado', 'Resultado', 'Stats', 'Predicción'],
           data.items.map(item => `<tr>
-            <td class="numeric">${na(item.date)}</td>
+            <td class="numeric">${formatDate(item.date, true)}</td>
             <td>${na(item.league)}</td>
             <td>${na(item.home_team)} vs ${na(item.away_team)}</td>
-            <td><span class="pill">${na(item.status)}</span></td>
+            <td><span class="badge neutral">${na(item.status)}</span></td>
             <td>${na(item.result)}</td>
-            <td>${item.has_stats ? 'Sí' : 'No'}</td>
-            <td>${item.has_predictions ? 'Sí' : 'No'}</td>
+            <td>${item.has_stats ? '<span class="badge positive">Sí</span>' : '<span class="badge neutral">No</span>'}</td>
+            <td>${item.has_predictions ? '<span class="badge positive">Sí</span>' : '<span class="badge neutral">No</span>'}</td>
           </tr>`)
         );
       } catch (err) {
@@ -854,7 +1291,7 @@
     async function searchPlayers() {
       const q = document.getElementById('playerQuery').value;
       const target = document.getElementById('playerResults');
-      target.textContent = 'Buscando...';
+      target.innerHTML = loading();
       try {
         const data = await fetchJson(`/api/players/search?q=${encodeURIComponent(q)}&limit=20`);
         if (!data.available) {
@@ -862,7 +1299,7 @@
           return;
         }
         target.innerHTML = data.items.length
-          ? data.items.map(player => `<button type="button" onclick="loadPlayer(${player.id})">${na(player.name)}</button>`).join(' ')
+          ? data.items.map(player => `<button class="ghost-button" type="button" onclick="loadPlayer(${player.id})">${na(player.name)}</button>`).join(' ')
           : '<p class="empty">No disponible</p>';
       } catch (err) {
         target.textContent = `Error: ${err.message}`;
@@ -871,32 +1308,38 @@
 
     async function loadPlayer(id) {
       const detail = document.getElementById('playerDetail');
-      detail.textContent = 'Cargando ficha...';
+      detail.innerHTML = loading();
       try {
         const [profile, last] = await Promise.all([
           fetchJson(`/api/players/${id}`),
           fetchJson(`/api/players/${id}/last-matches?limit=7`)
         ]);
         const p = profile.player || {};
+        const initial = String(p.name || '?').trim().slice(0, 1);
         const rows = (last.items || []).map(match => `<tr>
-          <td>${na(match.date)}</td><td>${na(match.rival)}</td><td>${na(match.competition)}</td>
+          <td>${formatDate(match.date)}</td><td>${na(match.rival)}</td><td>${na(match.competition)}</td>
           <td>${na(match.minutes)}</td><td>${na(match.goals)}</td><td>${na(match.assists)}</td>
           <td>${na(match.shots)}</td><td>${na(match.shots_on_target)}</td><td>${na(match.fouls)}</td>
           <td>${na(match.fouls_drawn)}</td><td>${na(match.cards)}</td><td>${na(match.rating)}</td><td>${na(match.result)}</td>
         </tr>`);
         const s = last.summary || {};
         detail.innerHTML = `
-          <h2>${na(p.name)}</h2>
-          <p class="muted">${na(p.team)} · ${na(p.position)} · ${na(p.league)}</p>
-          <div class="summary" style="margin-top:12px">
-            <div class="card"><div class="label">Goles</div><div class="value">${na(p.goals)}</div></div>
-            <div class="card"><div class="label">Asist.</div><div class="value">${na(p.assists)}</div></div>
-            <div class="card"><div class="label">Remates</div><div class="value">${na(p.shots)}</div></div>
-            <div class="card"><div class="label">Rating</div><div class="value">${na(p.rating)}</div></div>
+          <div class="player-card">
+            <div class="player-photo">${initial}</div>
+            <div>
+              <h2>${na(p.name)}</h2>
+              <p class="muted">${na(p.team)} · ${na(p.position)} · ${na(p.league)}</p>
+              <p class="sub">Nacionalidad: ${na(p.nationality)} · Edad: ${na(p.age)} · Altura: ${na(p.height)} · Peso: ${na(p.weight)}</p>
+            </div>
           </div>
-          <p class="sub">Edad: ${na(p.age)} · Nacionalidad: ${na(p.nationality)} · Altura: ${na(p.height)} · Peso: ${na(p.weight)}</p>
-          <p class="sub">Lesiones: ${(p.injuries || []).length ? p.injuries.map(i => na(i.reason)).join(', ') : 'No disponible'}</p>
-          <h2 style="margin-top:16px">Últimos 7 partidos</h2>
+          <div class="compact-metrics">
+            <div class="mini-card"><div class="label">Goles</div><div class="value">${na(p.goals)}</div></div>
+            <div class="mini-card"><div class="label">Asist.</div><div class="value">${na(p.assists)}</div></div>
+            <div class="mini-card"><div class="label">Remates</div><div class="value">${na(p.shots)}</div></div>
+            <div class="mini-card"><div class="label">Rating</div><div class="value">${na(p.rating)}</div></div>
+          </div>
+          <p class="sub" style="margin-top:12px">Lesiones: ${(p.injuries || []).length ? p.injuries.map(i => na(i.reason)).join(', ') : 'No disponible'}</p>
+          <h2 style="margin-top:18px">Últimos 7 partidos</h2>
           <p class="sub">Prom. remates: ${na(s.avg_shots)} · al arco: ${na(s.avg_shots_on_target)} · faltas: ${na(s.avg_fouls)} · recibidas: ${na(s.avg_fouls_drawn)} · minutos: ${na(s.avg_minutes)} · goles: ${na(s.goals_last_7)} · asistencias: ${na(s.assists_last_7)} · tendencia: ${na(s.trend)}</p>
           ${table(['Fecha','Rival','Comp.','Min','G','A','Rem','Arco','Faltas','Recib.','Tarj.','Rating','Resultado'], rows)}
         `;
@@ -908,7 +1351,7 @@
     async function searchTeams() {
       const q = document.getElementById('teamQuery').value;
       const target = document.getElementById('teamResults');
-      target.textContent = 'Buscando...';
+      target.innerHTML = loading();
       try {
         const data = await fetchJson(`/api/teams/search?q=${encodeURIComponent(q)}&limit=20`);
         if (!data.available) {
@@ -916,7 +1359,7 @@
           return;
         }
         target.innerHTML = data.items.length
-          ? data.items.map(team => `<button type="button" onclick="loadTeam(${team.id})">${na(team.name)}</button>`).join(' ')
+          ? data.items.map(team => `<button class="ghost-button" type="button" onclick="loadTeam(${team.id})">${na(team.name)}</button>`).join(' ')
           : '<p class="empty">No disponible</p>';
       } catch (err) {
         target.textContent = `Error: ${err.message}`;
@@ -925,21 +1368,21 @@
 
     async function loadTeam(id) {
       const detail = document.getElementById('teamDetail');
-      detail.textContent = 'Cargando equipo...';
+      detail.innerHTML = loading();
       try {
         const data = await fetchJson(`/api/teams/${id}`);
         const team = data.team || {};
-        const squad = (team.squad || []).slice(0, 18).map(player => `<span class="pill">${na(player.name)}</span>`).join(' ');
+        const squad = (team.squad || []).slice(0, 18).map(player => `<span class="badge neutral">${na(player.name)}</span>`).join(' ');
         detail.innerHTML = `
           <h2>${na(team.name)}</h2>
           <p class="muted">${na(team.country)} · ${na(team.league)}</p>
-          <div class="summary" style="margin-top:12px">
-            <div class="card"><div class="label">Corners favor</div><div class="value">${na(team.stats?.corners_for)}</div></div>
-            <div class="card"><div class="label">Remates</div><div class="value">${na(team.stats?.shots)}</div></div>
-            <div class="card"><div class="label">Predicciones</div><div class="value">${(team.predictions || []).length}</div></div>
-            <div class="card"><div class="label">Forma</div><div class="value">${na(team.stats?.recent_form)}</div></div>
+          <div class="compact-metrics">
+            <div class="mini-card"><div class="label">Corners favor</div><div class="value">${na(team.stats?.corners_for)}</div></div>
+            <div class="mini-card"><div class="label">Remates</div><div class="value">${na(team.stats?.shots)}</div></div>
+            <div class="mini-card"><div class="label">Predicciones</div><div class="value">${(team.predictions || []).length}</div></div>
+            <div class="mini-card"><div class="label">Forma</div><div class="value">${na(team.stats?.recent_form)}</div></div>
           </div>
-          <h2 style="margin-top:16px">Plantel</h2>
+          <h2 style="margin-top:18px">Plantel</h2>
           <div class="filters">${squad || 'No disponible'}</div>
         `;
       } catch (err) {
