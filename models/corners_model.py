@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import threading
 from datetime import datetime, timedelta, timezone
@@ -10,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from db.connection import get_session
 from db.models import Fixture, ModelPerformance, OddsSnapshot, Prediction, Team, TeamStat
+from services.value_bets import analyze_value
 
 
 MODEL_NAME = "corners_logistic_regression_v1"
@@ -348,23 +350,35 @@ def predict(fixture_id: int) -> dict[str, Any]:
         selected_market = MARKET if selected_is_over else "corners_under_9_5"
         expected_value = (model_probability * real_odds - 1) if real_odds else None
         confidence = _confidence(probability_over)
-        recommended = bool(real_odds and expected_value and expected_value > 0 and confidence >= 60)
+        value = analyze_value(model_probability, real_odds, confidence)
+        fixture = session.get(Fixture, fixture_id)
 
         prediction_values = {
             "fixture_id": fixture_id,
             "market": selected_market,
+            "model_name": MODEL_NAME,
+            "league": fixture.league if fixture else None,
             "probability": round(model_probability, 4),
+            "implied_probability": value.implied_probability,
             "fair_odds": fair_odds,
             "real_odds": real_odds,
-            "expected_value": round(expected_value, 4) if expected_value is not None else None,
+            "edge": value.edge,
+            "value_score": value.value_score,
+            "expected_value": value.expected_value,
             "confidence": confidence,
-            "recommended": recommended,
+            "recommended": value.recommended,
+            "pick_type": value.pick_type,
+            "predicted_at": _utcnow(),
         }
         stmt = pg_insert(Prediction).values(**prediction_values)
         session.execute(
             stmt.on_conflict_do_update(
-                index_elements=["fixture_id", "market"],
-                set_={key: value for key, value in prediction_values.items() if key not in {"fixture_id", "market"}},
+                index_elements=["fixture_id", "market", "model_name"],
+                set_={
+                    key: value
+                    for key, value in prediction_values.items()
+                    if key not in {"fixture_id", "market", "model_name"}
+                },
             )
         )
         session.commit()
@@ -380,9 +394,13 @@ def predict(fixture_id: int) -> dict[str, Any]:
         "real_odds_under": real_under,
         "edge_over": round(probability_over - (1 / real_over), 4) if real_over else None,
         "edge_under": round(probability_under - (1 / real_under), 4) if real_under else None,
-        "expected_value": round(expected_value, 4) if expected_value is not None else None,
+        "expected_value": value.expected_value,
+        "implied_probability": value.implied_probability,
+        "edge": value.edge,
+        "value_score": value.value_score,
         "confidence": confidence,
-        "recommended": recommended,
+        "recommended": value.recommended,
+        "pick_type": value.pick_type,
     }
 
 
@@ -406,6 +424,20 @@ def evaluate_model() -> dict[str, Any]:
     X_test = test_matrix[feature_cols].fillna(0)
     y_test = test_matrix["target_over_9_5"]
     probabilities = trained["model"].predict_proba(X_test)[:, 1]
+    brier_score = round(
+        sum((float(probability) - int(actual)) ** 2 for probability, actual in zip(probabilities, y_test))
+        / len(y_test),
+        4,
+    )
+    clipped = [min(max(float(probability), 1e-15), 1 - 1e-15) for probability in probabilities]
+    log_loss = round(
+        -sum(
+            int(actual) * math.log(probability) + (1 - int(actual)) * math.log(1 - probability)
+            for probability, actual in zip(clipped, y_test)
+        )
+        / len(y_test),
+        4,
+    )
 
     profit = 0.0
     stake = 1.0
@@ -434,8 +466,12 @@ def evaluate_model() -> dict[str, Any]:
                 ModelPerformance(
                     model_name=MODEL_NAME,
                     market=MARKET,
+                    league="ALL",
                     hit_rate=hit_rate,
                     roi=roi,
+                    yield_rate=roi,
+                    brier_score=brier_score,
+                    log_loss=log_loss,
                     sample_size=int(len(test_dataset)),
                     total_picks=total_picks,
                     last_updated=_utcnow(),
@@ -453,6 +489,9 @@ def evaluate_model() -> dict[str, Any]:
         "market": MARKET,
         "hit_rate": hit_rate,
         "roi": roi,
+        "yield_rate": roi,
+        "brier_score": brier_score,
+        "log_loss": log_loss,
         "sample_size": int(len(test_dataset)),
         "train_size": int(len(train_dataset)),
         "test_size": int(len(test_dataset)),

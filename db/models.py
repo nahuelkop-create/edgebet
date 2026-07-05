@@ -5,6 +5,7 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     UniqueConstraint,
@@ -18,6 +19,9 @@ class Base(DeclarativeBase):
 
 class Fixture(Base):
     __tablename__ = "fixtures"
+    __table_args__ = (
+        Index("ix_fixtures_status_date", "status", "date"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     home_team: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -51,6 +55,9 @@ class Player(Base):
 
 class PlayerStat(Base):
     __tablename__ = "player_stats"
+    __table_args__ = (
+        Index("ix_player_stats_fixture_player", "fixture_id", "player_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
@@ -65,8 +72,34 @@ class PlayerStat(Base):
     rating: Mapped[float | None] = mapped_column(Float)
 
 
+class InjuryReport(Base):
+    __tablename__ = "injury_reports"
+    __table_args__ = (
+        UniqueConstraint("fixture_id", "player_id", "reason", name="uq_injury_fixture_player_reason"),
+        Index("ix_injury_reports_fixture_id", "fixture_id"),
+        Index("ix_injury_reports_team_id", "team_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
+    player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+    player_name: Mapped[str | None] = mapped_column(String(255))
+    team_name: Mapped[str | None] = mapped_column(String(255))
+    reason: Mapped[str | None] = mapped_column(String(255))
+    status: Mapped[str | None] = mapped_column(String(100))
+    reported_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+
+
 class TeamStat(Base):
     __tablename__ = "team_stats"
+    __table_args__ = (
+        Index("ix_team_stats_fixture_team", "fixture_id", "team_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
@@ -79,6 +112,9 @@ class TeamStat(Base):
 
 class OddsSnapshot(Base):
     __tablename__ = "odds_snapshots"
+    __table_args__ = (
+        Index("ix_odds_snapshots_fixture_market_time", "fixture_id", "market", "timestamp"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
@@ -98,21 +134,38 @@ class OddsSnapshot(Base):
 
 class Prediction(Base):
     __tablename__ = "predictions"
-    # One stored prediction per (fixture, market): predict() upserts on these
-    # columns instead of inserting a new row every time a fixture is analyzed.
+    # One stored prediction per (fixture, market, model). This keeps model
+    # versions comparable without inserting duplicate rows for repeated runs.
     __table_args__ = (
-        UniqueConstraint("fixture_id", "market", name="uq_predictions_fixture_market"),
+        UniqueConstraint("fixture_id", "market", "model_name", name="uq_predictions_fixture_market_model"),
+        Index("ix_predictions_fixture_id", "fixture_id"),
+        Index("ix_predictions_market_model", "market", "model_name"),
+        Index("ix_predictions_predicted_at", "predicted_at"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
     market: Mapped[str | None] = mapped_column(String(100))
+    model_name: Mapped[str] = mapped_column(String(255), default="unknown", nullable=False)
+    league: Mapped[str | None] = mapped_column(String(255))
     probability: Mapped[float | None] = mapped_column(Float)
+    implied_probability: Mapped[float | None] = mapped_column(Float)
     fair_odds: Mapped[float | None] = mapped_column(Float)
     real_odds: Mapped[float | None] = mapped_column(Float)
+    edge: Mapped[float | None] = mapped_column(Float)
+    value_score: Mapped[float | None] = mapped_column(Float)
     expected_value: Mapped[float | None] = mapped_column(Float)
     confidence: Mapped[float | None] = mapped_column(Float)
     recommended: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    pick_type: Mapped[str | None] = mapped_column(String(50))
+    predicted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=datetime.utcnow,
+        nullable=False,
+    )
+    closing_odds: Mapped[float | None] = mapped_column(Float)
+    closing_implied_probability: Mapped[float | None] = mapped_column(Float)
+    clv: Mapped[float | None] = mapped_column(Float)
     correct: Mapped[bool | None] = mapped_column(Boolean)
     profit: Mapped[float | None] = mapped_column(Float)
     settled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -130,6 +183,10 @@ class ModelPerformance(Base):
     market: Mapped[str] = mapped_column(String(100), nullable=False)
     hit_rate: Mapped[float | None] = mapped_column(Float)
     roi: Mapped[float | None] = mapped_column(Float)
+    yield_rate: Mapped[float | None] = mapped_column(Float)
+    brier_score: Mapped[float | None] = mapped_column(Float)
+    log_loss: Mapped[float | None] = mapped_column(Float)
+    league: Mapped[str | None] = mapped_column(String(255))
     sample_size: Mapped[int | None] = mapped_column(Integer)
     # Real number of picks evaluated on the held-out test set (not the full
     # dataset size, which is stored in sample_size).

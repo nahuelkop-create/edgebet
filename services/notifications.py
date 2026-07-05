@@ -27,6 +27,7 @@ import requests
 from dotenv import load_dotenv
 
 from collectors.fixtures_collector import collect_upcoming_fixtures
+from collectors.injuries_collector import collect_injuries
 from collectors.odds_collector import collect_odds
 from collectors.stats_collector import collect_finished_match_stats
 from models.corners_model import retrain_if_needed
@@ -59,6 +60,7 @@ RESULTS_INTERVAL = 30 * 60              # scheduler: results check every 30 min
 FIXTURES_COLLECTOR_INTERVAL = 6 * 60 * 60  # scheduler: upcoming fixtures every 6h
 STATS_COLLECTOR_INTERVAL = 2 * 60 * 60     # scheduler: finished match stats every 2h
 ODDS_COLLECTOR_INTERVAL = 2 * 60 * 60      # scheduler: odds snapshots every 2h
+INJURIES_COLLECTOR_INTERVAL = 6 * 60 * 60  # scheduler: injuries every 6h
 MODEL_RETRAIN_INTERVAL = 7 * 24 * 60 * 60   # scheduler: model retrain every week
 
 
@@ -702,6 +704,11 @@ def start_schedulers():
     ).start()
     threading.Thread(
         target=_run_loop,
+        args=(collect_injuries, INJURIES_COLLECTOR_INTERVAL, 150, "collector-injuries"),
+        daemon=True,
+    ).start()
+    threading.Thread(
+        target=_run_loop,
         args=(
             retrain_corners_model_job,
             MODEL_RETRAIN_INTERVAL,
@@ -713,11 +720,13 @@ def start_schedulers():
     logging.info(
         (
             "Schedulers iniciados: pre-partido cada %smin, resultados cada %smin, "
-            "fixtures cada %smin, stats cada %smin, odds cada %smin, modelo domingos 03:00 UTC."
+            "fixtures cada %smin, stats cada %smin, odds cada %smin, injuries cada %smin, "
+            "modelo domingos 03:00 UTC."
         ),
         PRE_MATCH_INTERVAL // 60,
         RESULTS_INTERVAL // 60,
         FIXTURES_COLLECTOR_INTERVAL // 60,
         STATS_COLLECTOR_INTERVAL // 60,
         ODDS_COLLECTOR_INTERVAL // 60,
+        INJURIES_COLLECTOR_INTERVAL // 60,
     )

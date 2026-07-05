@@ -229,12 +229,20 @@ def format_corners_model_context(prediction: dict) -> str:
     edge_over_text = f"{edge_over * 100:+.1f} pp" if edge_over is not None else "N/D"
     edge_under_text = f"{edge_under * 100:+.1f} pp" if edge_under is not None else "N/D"
     recommended = "Sí" if prediction.get("recommended") else "No"
+    implied = prediction.get("implied_probability")
+    implied_text = f"{implied * 100:.1f}%" if implied is not None else "N/D"
+    ev = prediction.get("expected_value")
+    ev_text = f"{ev:+.3f}" if ev is not None else "N/D"
+    value_score = prediction.get("value_score")
+    value_score_text = f"{value_score:+.3f}" if value_score is not None else "N/D"
     return (
         "Modelo corners 9.5 (regresión logística sobre team_stats históricos):\n"
         f"- Over 9.5: {over_prob}% | cuota justa @{prediction.get('fair_odds_over')} | "
         f"cuota real @{prediction.get('real_odds_over') or 'N/D'} | edge {edge_over_text}\n"
         f"- Under 9.5: {under_prob}% | cuota justa @{prediction.get('fair_odds_under')} | "
         f"cuota real @{prediction.get('real_odds_under') or 'N/D'} | edge {edge_under_text}\n"
+        f"- Tipo: {prediction.get('pick_type') or 'N/D'} | Implícita: {implied_text} | "
+        f"EV: {ev_text} | Value score: {value_score_text}\n"
         f"- Confianza modelo: {prediction.get('confidence')}% | Recomienda: {recommended}\n"
     )
 

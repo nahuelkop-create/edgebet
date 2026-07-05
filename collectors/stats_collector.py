@@ -5,7 +5,7 @@ from typing import Any
 from sqlalchemy import delete, select
 
 from db.connection import get_session
-from db.models import Fixture, Player, PlayerStat, Prediction, Team, TeamStat
+from db.models import Fixture, OddsSnapshot, Player, PlayerStat, Prediction, Team, TeamStat
 from collectors.fixtures_collector import LEAGUES_TO_COLLECT, _upsert_fixture
 from services.football_data import _get
 
@@ -114,18 +114,39 @@ def _store_player_stats(session, fixture_id: int) -> int:
     return saved
 
 
-def _settle_prediction(prediction: Prediction, total_corners: int) -> bool:
+def _closing_corner_odds(session, fixture_id: int, is_over: bool) -> float | None:
+    snapshot = session.scalar(
+        select(OddsSnapshot)
+        .where(
+            OddsSnapshot.fixture_id == fixture_id,
+            OddsSnapshot.market.in_(("corners_9_5", "corners", "corners_total_9_5")),
+        )
+        .order_by(OddsSnapshot.timestamp.desc())
+        .limit(1)
+    )
+    if snapshot is None:
+        return None
+    return snapshot.over_odds if is_over else snapshot.under_odds
+
+
+def _settle_prediction(session, prediction: Prediction, total_corners: int) -> bool:
     market = (prediction.market or "").lower()
     if "corners_over_9_5" in market or market in {"corners_9_5", "corners", "corners_total_9_5"}:
         correct = total_corners > CORNER_LINE
+        is_over = True
     elif "corners_under_9_5" in market:
         correct = total_corners < CORNER_LINE
+        is_over = False
     else:
         return False
 
     odds = prediction.real_odds
+    closing_odds = _closing_corner_odds(session, int(prediction.fixture_id), is_over) if prediction.fixture_id else None
     prediction.correct = bool(correct)
     prediction.profit = round(float(odds) - 1.0, 4) if correct and odds else (-1.0 if not correct else None)
+    prediction.closing_odds = closing_odds
+    prediction.closing_implied_probability = round(1 / closing_odds, 4) if closing_odds and closing_odds > 1 else None
+    prediction.clv = round((odds / closing_odds) - 1, 4) if closing_odds and odds else None
     prediction.settled_at = datetime.now(timezone.utc)
     return True
 
@@ -142,7 +163,7 @@ def _settle_predictions(session, fixture_id: int) -> int:
     ).all()
     settled = 0
     for prediction in predictions:
-        if _settle_prediction(prediction, total_corners):
+        if _settle_prediction(session, prediction, total_corners):
             settled += 1
     return settled
 
