@@ -497,7 +497,7 @@ def api_player_detail(player_id: int):
                 "id": player.id,
                 "name": player.name,
                 "age": None,
-                "nationality": None,
+                "nationality": player.nationality,
                 "team": team.name if team else "No disponible",
                 "team_id": player.team_id,
                 "position": player.position,
@@ -661,7 +661,15 @@ def api_team_detail(team_id: int):
                 "country": None,
                 "league": team.league,
                 "crest": None,
-                "squad": [{"id": player.id, "name": player.name, "position": player.position} for player in players],
+                "squad": [
+                    {
+                        "id": player.id,
+                        "name": player.name,
+                        "position": player.position,
+                        "nationality": player.nationality,
+                    }
+                    for player in players
+                ],
                 "upcoming_matches": [_fixture_payload(session, row) for row in fixtures if row.status in UPCOMING_STATUSES][:5],
                 "last_matches": [_fixture_payload(session, row) for row in fixtures if row.status in FINISHED_STATUSES][:5],
                 "stats": {

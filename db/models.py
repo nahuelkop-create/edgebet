@@ -49,6 +49,7 @@ class Player(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
     position: Mapped[str | None] = mapped_column(String(50))
+    nationality: Mapped[str | None] = mapped_column(String(100))
 
     team: Mapped[Team | None] = relationship(back_populates="players")
 
