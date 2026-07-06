@@ -536,6 +536,38 @@
       font-size: 34px;
       font-weight: 900;
       text-transform: uppercase;
+      overflow: hidden;
+    }
+
+    .player-photo img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+      background: #151515;
+    }
+
+    .profile-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .profile-item {
+      min-width: 0;
+      padding: 10px 12px;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: var(--card-soft);
+    }
+
+    .profile-item strong {
+      display: block;
+      margin-top: 4px;
+      overflow-wrap: anywhere;
+      font-size: 14px;
+      line-height: 1.35;
     }
 
     .compact-metrics {
@@ -608,7 +640,7 @@
     }
 
     @media (max-width: 560px) {
-      .summary, .compact-metrics { grid-template-columns: 1fr; }
+      .summary, .compact-metrics, .profile-grid { grid-template-columns: 1fr; }
       .player-card { grid-template-columns: 1fr; }
       .player-photo { width: 76px; height: 76px; border-radius: 14px; }
       .nav { grid-template-columns: 1fr; }
@@ -1315,39 +1347,57 @@
           fetchJson(`/api/players/${id}/last-matches?limit=7`)
         ]);
         const p = profile.player || {};
-        const initial = String(p.name || '?').trim().slice(0, 1);
         const rows = (last.items || []).map(match => `<tr>
           <td>${formatDate(match.date)}</td><td>${na(match.rival)}</td><td>${na(match.competition)}</td>
           <td>${na(match.minutes)}</td><td>${na(match.goals)}</td><td>${na(match.assists)}</td>
           <td>${na(match.shots)}</td><td>${na(match.shots_on_target)}</td><td>${na(match.fouls)}</td>
-          <td>${na(match.fouls_drawn)}</td><td>${na(match.cards)}</td><td>${na(match.rating)}</td><td>${na(match.result)}</td>
+          <td>${na(match.fouls_drawn)}</td><td>${na(match.yellow_cards)}</td><td>${na(match.red_cards)}</td>
+          <td>${na(match.saves)}</td><td>${na(match.rating)}</td><td>${na(match.result)}</td>
         </tr>`);
         const s = last.summary || {};
+        const photoUrl = p.photo_url || p.photo;
         detail.innerHTML = `
           <div class="player-card">
-            <div class="player-photo">${initial}</div>
+            <div class="player-photo">
+              <img src="${photoUrl || `/static/placeholder_player.png`}" alt="${na(p.name)}" onerror="this.src='/static/placeholder_player.png'">
+            </div>
             <div>
               <h2>${na(p.name)}</h2>
-              <p class="muted">${na(p.team)} · ${na(p.position)} · ${na(p.league)}</p>
-              <p class="sub">Nacionalidad: ${na(p.nationality)} · Edad: ${na(p.age)} · Altura: ${na(p.height)} · Peso: ${na(p.weight)}</p>
+              <p class="muted">${na(p.team)} &middot; ${na(p.position)} &middot; ${na(p.league)}</p>
+              <div class="profile-grid">
+                <div class="profile-item"><div class="label">Edad</div><strong>${na(p.age)}</strong></div>
+                <div class="profile-item"><div class="label">Nacimiento</div><strong>${na(p.birth_date)}${p.birth_place ? `, ${p.birth_place}` : ''}</strong></div>
+                <div class="profile-item"><div class="label">Nacionalidad</div><strong>${na(p.nationality)}</strong></div>
+                <div class="profile-item"><div class="label">Altura</div><strong>${na(p.height)}</strong></div>
+                <div class="profile-item"><div class="label">Peso</div><strong>${na(p.weight)}</strong></div>
+                <div class="profile-item"><div class="label">Pierna habil</div><strong>${na(p.preferred_foot)}</strong></div>
+                <div class="profile-item"><div class="label">Camiseta</div><strong>${na(p.shirt_number)}</strong></div>
+              </div>
             </div>
           </div>
           <div class="compact-metrics">
+            <div class="mini-card"><div class="label">Partidos</div><div class="value">${na(p.matches_played)}</div></div>
+            <div class="mini-card"><div class="label">Minutos</div><div class="value">${na(p.minutes)}</div></div>
             <div class="mini-card"><div class="label">Goles</div><div class="value">${na(p.goals)}</div></div>
             <div class="mini-card"><div class="label">Asist.</div><div class="value">${na(p.assists)}</div></div>
             <div class="mini-card"><div class="label">Remates</div><div class="value">${na(p.shots)}</div></div>
+            <div class="mini-card"><div class="label">Al arco</div><div class="value">${na(p.shots_on_target)}</div></div>
+            <div class="mini-card"><div class="label">Faltas</div><div class="value">${na(p.fouls_committed)}</div></div>
+            <div class="mini-card"><div class="label">Recibidas</div><div class="value">${na(p.fouls_drawn)}</div></div>
+            <div class="mini-card"><div class="label">Amarillas</div><div class="value">${na(p.yellow_cards)}</div></div>
+            <div class="mini-card"><div class="label">Rojas</div><div class="value">${na(p.red_cards)}</div></div>
+            <div class="mini-card"><div class="label">Atajadas</div><div class="value">${na(p.saves)}</div></div>
             <div class="mini-card"><div class="label">Rating</div><div class="value">${na(p.rating)}</div></div>
           </div>
           <p class="sub" style="margin-top:12px">Lesiones: ${(p.injuries || []).length ? p.injuries.map(i => na(i.reason)).join(', ') : 'No disponible'}</p>
-          <h2 style="margin-top:18px">Últimos 7 partidos</h2>
-          <p class="sub">Prom. remates: ${na(s.avg_shots)} · al arco: ${na(s.avg_shots_on_target)} · faltas: ${na(s.avg_fouls)} · recibidas: ${na(s.avg_fouls_drawn)} · minutos: ${na(s.avg_minutes)} · goles: ${na(s.goals_last_7)} · asistencias: ${na(s.assists_last_7)} · tendencia: ${na(s.trend)}</p>
-          ${table(['Fecha','Rival','Comp.','Min','G','A','Rem','Arco','Faltas','Recib.','Tarj.','Rating','Resultado'], rows)}
+          <h2 style="margin-top:18px">Ultimos 7 partidos</h2>
+          <p class="sub">Prom. remates: ${na(s.avg_shots)} &middot; al arco: ${na(s.avg_shots_on_target)} &middot; faltas: ${na(s.avg_fouls)} &middot; recibidas: ${na(s.avg_fouls_drawn)} &middot; minutos: ${na(s.avg_minutes)} &middot; goles: ${na(s.goals_last_7)} &middot; asistencias: ${na(s.assists_last_7)} &middot; tendencia: ${na(s.trend)}</p>
+          ${table(['Fecha','Rival','Comp.','Min','G','A','Rem','Arco','Faltas','Recib.','TA','TR','Ataj.','Rating','Resultado'], rows)}
         `;
       } catch (err) {
         detail.textContent = `Error: ${err.message}`;
       }
     }
-
     async function searchTeams() {
       const q = document.getElementById('teamQuery').value;
       const target = document.getElementById('teamResults');

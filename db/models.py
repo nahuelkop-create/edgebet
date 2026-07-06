@@ -50,6 +50,11 @@ class Player(Base):
     team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
     position: Mapped[str | None] = mapped_column(String(50))
     nationality: Mapped[str | None] = mapped_column(String(100))
+    age: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[str | None] = mapped_column(String(50))
+    weight: Mapped[str | None] = mapped_column(String(50))
+    birth_date: Mapped[str | None] = mapped_column(String(50))
+    birth_place: Mapped[str | None] = mapped_column(String(255))
 
     team: Mapped[Team | None] = relationship(back_populates="players")
 
@@ -63,6 +68,8 @@ class PlayerStat(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
     fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
+    appearances: Mapped[int | None] = mapped_column(Integer)
+    minutes: Mapped[int | None] = mapped_column(Integer)
     shots: Mapped[int | None] = mapped_column(Integer)
     shots_on_target: Mapped[int | None] = mapped_column(Integer)
     fouls_committed: Mapped[int | None] = mapped_column(Integer)
@@ -70,6 +77,8 @@ class PlayerStat(Base):
     saves: Mapped[int | None] = mapped_column(Integer)
     assists: Mapped[int | None] = mapped_column(Integer)
     goals: Mapped[int | None] = mapped_column(Integer)
+    yellow_cards: Mapped[int | None] = mapped_column(Integer)
+    red_cards: Mapped[int | None] = mapped_column(Integer)
     rating: Mapped[float | None] = mapped_column(Float)
 
 

@@ -54,6 +54,15 @@ def _apply_incremental_migrations(engine) -> None:
         conn.execute(text("ALTER TABLE model_performance ADD COLUMN IF NOT EXISTS best_league VARCHAR(255)"))
         conn.execute(text("ALTER TABLE model_performance ADD COLUMN IF NOT EXISTS best_market VARCHAR(100)"))
         conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS nationality VARCHAR(100)"))
+        conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS age INTEGER"))
+        conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS height VARCHAR(50)"))
+        conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS weight VARCHAR(50)"))
+        conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS birth_date VARCHAR(50)"))
+        conn.execute(text("ALTER TABLE players ADD COLUMN IF NOT EXISTS birth_place VARCHAR(255)"))
+        conn.execute(text("ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS appearances INTEGER"))
+        conn.execute(text("ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS minutes INTEGER"))
+        conn.execute(text("ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS yellow_cards INTEGER"))
+        conn.execute(text("ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS red_cards INTEGER"))
         # Drop pre-existing duplicate predictions (keep the latest row per
         # fixture+market) before enforcing uniqueness, otherwise the index
         # creation would fail on legacy data.

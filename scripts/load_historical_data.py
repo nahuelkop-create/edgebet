@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 from dotenv import load_dotenv
-from sqlalchemy import delete
+from sqlalchemy import delete, func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
@@ -142,20 +142,32 @@ def _upsert_player(session, player: dict[str, Any], team_id: int | None, positio
     player_id = player.get("id")
     if player_id is None:
         return False
+    birth = player.get("birth", {}) or {}
     values = {
         "id": int(player_id),
         "name": player.get("name") or "Unknown",
         "team_id": team_id,
         "position": position or player.get("position"),
         "nationality": player.get("nationality"),
+        "age": _to_int(player.get("age")),
+        "height": player.get("height"),
+        "weight": player.get("weight"),
+        "birth_date": birth.get("date"),
+        "birth_place": birth.get("place"),
     }
-    stmt = pg_insert(Player).values(**values).on_conflict_do_update(
+    stmt = pg_insert(Player).values(**values)
+    stmt = stmt.on_conflict_do_update(
         index_elements=["id"],
         set_={
             "name": values["name"],
             "team_id": values["team_id"],
-            "position": values["position"],
-            "nationality": values["nationality"],
+            "position": func.coalesce(stmt.excluded.position, Player.position),
+            "nationality": func.coalesce(stmt.excluded.nationality, Player.nationality),
+            "age": func.coalesce(stmt.excluded.age, Player.age),
+            "height": func.coalesce(stmt.excluded.height, Player.height),
+            "weight": func.coalesce(stmt.excluded.weight, Player.weight),
+            "birth_date": func.coalesce(stmt.excluded.birth_date, Player.birth_date),
+            "birth_place": func.coalesce(stmt.excluded.birth_place, Player.birth_place),
         },
     )
     session.execute(stmt)
@@ -204,12 +216,15 @@ def _store_player_stats(session, fixture_id: int) -> tuple[int, int]:
             goals = stat.get("goals", {}) or {}
             shots = stat.get("shots", {}) or {}
             fouls = stat.get("fouls", {}) or {}
+            cards = stat.get("cards", {}) or {}
             if _upsert_player(session, player, int(team_id) if team_id is not None else None, games.get("position")):
                 players_saved += 1
             session.add(
                 PlayerStat(
                     player_id=int(player_id),
                     fixture_id=fixture_id,
+                    appearances=_to_int(games.get("appearences") or games.get("appearances")),
+                    minutes=_to_int(games.get("minutes")),
                     shots=_to_int(shots.get("total")),
                     shots_on_target=_to_int(shots.get("on")),
                     fouls_committed=_to_int(fouls.get("committed")),
@@ -217,6 +232,8 @@ def _store_player_stats(session, fixture_id: int) -> tuple[int, int]:
                     saves=_to_int(goals.get("saves")),
                     assists=_to_int(goals.get("assists")),
                     goals=_to_int(goals.get("total")),
+                    yellow_cards=_to_int(cards.get("yellow")),
+                    red_cards=_to_int(cards.get("red")),
                     rating=_to_float(games.get("rating")),
                 )
             )

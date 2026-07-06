@@ -510,6 +510,20 @@ def _latest_player_stat(session, player_id: int) -> PlayerStat | None:
     )
 
 
+def _player_photo_url(player_id: int) -> str:
+    return f"https://media.api-sports.io/football/players/{player_id}.png"
+
+
+def _sum_numbers(rows, attr: str):
+    values = [getattr(row, attr) for row in rows if getattr(row, attr) is not None]
+    return sum(values) if values else None
+
+
+def _avg_numbers(rows, attr: str):
+    values = [getattr(row, attr) for row in rows if getattr(row, attr) is not None]
+    return round(sum(values) / len(values), 2) if values else None
+
+
 @app.get("/api/players/<int:player_id>")
 def api_player_detail(player_id: int):
     session, error = _pg_session()
@@ -520,38 +534,49 @@ def api_player_detail(player_id: int):
         if not player:
             return jsonify({"available": True, "error": "player not found"}), 404
         team = session.get(Team, player.team_id) if player.team_id else None
-        latest = _latest_player_stat(session, player_id)
+        stats = session.scalars(
+            select(PlayerStat)
+            .join(Fixture, Fixture.id == PlayerStat.fixture_id)
+            .where(PlayerStat.player_id == player_id)
+            .order_by(Fixture.date.desc())
+        ).all()
         injuries = session.scalars(select(InjuryReport).where(InjuryReport.player_id == player_id).order_by(InjuryReport.reported_at.desc())).all()
         return jsonify({
             "available": True,
             "player": {
                 "id": player.id,
                 "name": player.name,
-                "age": None,
+                "age": player.age,
+                "birth_date": player.birth_date,
+                "birth_place": player.birth_place,
                 "nationality": player.nationality,
                 "team": team.name if team else "No disponible",
                 "team_id": player.team_id,
                 "position": player.position,
-                "height": None,
-                "weight": None,
-                "photo": None,
+                "height": player.height,
+                "weight": player.weight,
+                "preferred_foot": "No disponible",
+                "shirt_number": None,
+                "photo": _player_photo_url(player.id),
+                "photo_url": _player_photo_url(player.id),
                 "league": team.league if team else None,
                 "season": None,
-                "matches_played": None,
-                "minutes": None,
-                "goals": latest.goals if latest else None,
-                "assists": latest.assists if latest else None,
-                "shots": latest.shots if latest else None,
-                "shots_on_target": latest.shots_on_target if latest else None,
+                "matches_played": _sum_numbers(stats, "appearances") or len(stats) or None,
+                "minutes": _sum_numbers(stats, "minutes"),
+                "goals": _sum_numbers(stats, "goals"),
+                "assists": _sum_numbers(stats, "assists"),
+                "shots": _sum_numbers(stats, "shots"),
+                "shots_on_target": _sum_numbers(stats, "shots_on_target"),
                 "passes": None,
                 "key_passes": None,
-                "fouls_committed": latest.fouls_committed if latest else None,
-                "fouls_drawn": latest.fouls_drawn if latest else None,
-                "yellow_cards": None,
-                "red_cards": None,
+                "fouls_committed": _sum_numbers(stats, "fouls_committed"),
+                "fouls_drawn": _sum_numbers(stats, "fouls_drawn"),
+                "yellow_cards": _sum_numbers(stats, "yellow_cards"),
+                "red_cards": _sum_numbers(stats, "red_cards"),
+                "saves": _sum_numbers(stats, "saves"),
                 "corners_generated": None,
                 "offsides": None,
-                "rating": latest.rating if latest else None,
+                "rating": _avg_numbers(stats, "rating"),
                 "injuries": [
                     {
                         "fixture_id": row.fixture_id,
@@ -601,7 +626,7 @@ def api_player_last_matches(player_id: int):
                 "rival": rival,
                 "competition": fixture.league,
                 "home_away": home_away,
-                "minutes": None,
+                "minutes": stat.minutes,
                 "goals": stat.goals,
                 "assists": stat.assists,
                 "shots": stat.shots,
@@ -609,7 +634,10 @@ def api_player_last_matches(player_id: int):
                 "passes": None,
                 "fouls": stat.fouls_committed,
                 "fouls_drawn": stat.fouls_drawn,
-                "cards": None,
+                "cards": (stat.yellow_cards or 0) + (stat.red_cards or 0) if stat.yellow_cards is not None or stat.red_cards is not None else None,
+                "yellow_cards": stat.yellow_cards,
+                "red_cards": stat.red_cards,
+                "saves": stat.saves,
                 "rating": stat.rating,
                 "result": fixture.result,
             })
