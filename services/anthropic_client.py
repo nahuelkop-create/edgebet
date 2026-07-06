@@ -2,18 +2,21 @@ import json
 import os
 import re
 import unicodedata
+from datetime import datetime
 from dotenv import load_dotenv
 
 import anthropic
 from services.football_data import (
     get_team_recent_matches,
     get_group_standings,
+    get_league_standings,
     get_player_stats,
     get_team_stats,
     get_tournament_player_leaders,
     get_referee_profile,
     get_head_to_head,
     get_fixture_lineups,
+    team_has_champions_league,
 )
 from services.odds_service import get_match_odds
 
@@ -93,6 +96,68 @@ def format_recent_matches(matches: list) -> str:
         away_goals = full.get("away")
         lines.append(f"{utc}: {home} {home_goals}-{away_goals} {away}")
     return "[" + "; ".join(lines) + "]"
+
+
+EUROPEAN_LEAGUES = {
+    39: {"name": "Premier League"},
+    140: {"name": "La Liga"},
+}
+
+
+def _season_from_match_date(utc_date: str) -> int:
+    try:
+        dt = datetime.fromisoformat(str(utc_date).replace("Z", "+00:00"))
+    except Exception:
+        return 2026
+    return dt.year if dt.month >= 7 else dt.year - 1
+
+
+def _standing_row(table: list, team_id) -> dict:
+    return next((row for row in table or [] if row.get("team", {}).get("id") == team_id), {})
+
+
+def _format_standing_row(row: dict) -> str:
+    if not row:
+        return "posicion N/D"
+    return (
+        f"{row.get('position', 'N/D')}° | {row.get('points', 'N/D')} pts | "
+        f"{row.get('playedGames', 'N/D')} PJ | "
+        f"{row.get('won', 0)}G-{row.get('draw', 0)}E-{row.get('lost', 0)}P | "
+        f"GF {row.get('goalsFor', 'N/D')} / GC {row.get('goalsAgainst', 'N/D')}"
+    )
+
+
+def format_european_league_context(match: dict, home_history: list, away_history: list) -> str:
+    competition = match.get("competition", {}) or {}
+    try:
+        league_id = int(competition.get("id"))
+    except (TypeError, ValueError):
+        league_id = None
+    if league_id not in EUROPEAN_LEAGUES:
+        return ""
+
+    home = match.get("homeTeam", {}) or {}
+    away = match.get("awayTeam", {}) or {}
+    home_id = home.get("id")
+    away_id = away.get("id")
+    season = _season_from_match_date(match.get("utcDate", ""))
+    standings = get_league_standings(int(league_id), season)
+    table = standings.get("table", [])
+    home_row = _standing_row(table, home_id)
+    away_row = _standing_row(table, away_id)
+    home_champions = team_has_champions_league(home_id, season) if home_id else False
+    away_champions = team_has_champions_league(away_id, season) if away_id else False
+
+    return (
+        "CONTEXTO LIGA EUROPEA (Premier League / La Liga):\n"
+        f"- Temporada local: {season}. Usar este bloque para motivacion, rotacion y fatiga.\n"
+        f"- Posicion {home.get('name', 'Local')}: {_format_standing_row(home_row)}.\n"
+        f"- Posicion {away.get('name', 'Visitante')}: {_format_standing_row(away_row)}.\n"
+        f"- Doble competencia Champions: {home.get('name', 'Local')}={'si' if home_champions else 'no'}; "
+        f"{away.get('name', 'Visitante')}={'si' if away_champions else 'no'}.\n"
+        f"- Racha ultimos 5 en esta liga {home.get('name', 'Local')}: {format_recent_matches(home_history)}\n"
+        f"- Racha ultimos 5 en esta liga {away.get('name', 'Visitante')}: {format_recent_matches(away_history)}\n"
+    )
 
 
 def format_referee_context(referee: dict) -> str:
@@ -400,6 +465,7 @@ def format_match_prompt(match: dict) -> str:
     home_id = home_team.get("id")
     away_id = away_team.get("id")
     competition = match.get("competition", {}).get("name", "Competición")
+    competition_id = match.get("competition", {}).get("id")
     utc_date = match.get("utcDate", "fecha desconocida")
     status = match.get("status", "desconocido")
     stage = match.get("stage", "N/A")
@@ -413,8 +479,26 @@ def format_match_prompt(match: dict) -> str:
     else:
         date_to = None
 
-    home_history = get_team_recent_matches(home_id, limit=5, date_to=date_to)
-    away_history = get_team_recent_matches(away_id, limit=5, date_to=date_to)
+    try:
+        competition_id_int = int(competition_id) if competition_id is not None else None
+    except (TypeError, ValueError):
+        competition_id_int = None
+    european_league_id = competition_id_int if competition_id_int in EUROPEAN_LEAGUES else None
+    european_season = _season_from_match_date(match.get("utcDate", "")) if european_league_id else None
+    home_history = get_team_recent_matches(
+        home_id,
+        limit=5,
+        date_to=date_to,
+        league_id=european_league_id,
+        season=european_season,
+    )
+    away_history = get_team_recent_matches(
+        away_id,
+        limit=5,
+        date_to=date_to,
+        league_id=european_league_id,
+        season=european_season,
+    )
     group_standings = get_group_standings(str(match.get("competition", {}).get("id", "")), group)
     
     # Get real team statistics
@@ -454,6 +538,7 @@ def format_match_prompt(match: dict) -> str:
     corners_model_text = format_corners_model_context(corners_prediction)
     sonada_candidates = build_sonada_candidates(odds)
     sonada_candidates_text = format_sonada_candidates(sonada_candidates)
+    european_context_text = format_european_league_context(match, home_history, away_history)
 
     # Build real per-category player rankings (match + tournament data)
     player_stats_text = _format_player_rankings(
@@ -534,6 +619,7 @@ def format_match_prompt(match: dict) -> str:
         "CONTEXTO: Este es un partido de fase eliminatoria del Mundial 2026. Los partidos de esta fase son más cerrados, con menos goles y menos faltas que la fase de grupos.\n"
         f"Partido: {home_name} (id {home_id}) vs {away_name} (id {away_id})\n"
         f"Competición: {competition} | Fase: {stage} - {group} - Jornada {matchday} | Estado: {status}\n\n"
+        f"{european_context_text}"
         f"Estadísticas {home_name}:\n{home_stats_text}\n"
         f"Últimos 5: {home_history_text}\n\n"
         f"Estadísticas {away_name}:\n{away_stats_text}\n"

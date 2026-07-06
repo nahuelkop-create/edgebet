@@ -376,6 +376,8 @@
 
     .table-scroll {
       overflow-x: auto;
+      max-width: 100%;
+      -webkit-overflow-scrolling: touch;
     }
 
     table {
@@ -460,6 +462,10 @@
       margin: 16px 0;
     }
 
+    .filters > * {
+      max-width: 100%;
+    }
+
     input, select, button {
       min-height: 42px;
       border: 1px solid var(--border);
@@ -522,6 +528,23 @@
       align-items: start;
     }
 
+    .team-card {
+      display: grid;
+      grid-template-columns: 96px minmax(0, 1fr);
+      gap: 16px;
+      align-items: center;
+    }
+
+    .team-crest {
+      width: 96px;
+      height: 96px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: #101010;
+      object-fit: contain;
+      padding: 8px;
+    }
+
     .player-photo {
       width: 92px;
       height: 92px;
@@ -568,6 +591,19 @@
       overflow-wrap: anywhere;
       font-size: 14px;
       line-height: 1.35;
+    }
+
+    .button-list {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .button-list button {
+      max-width: 100%;
+      overflow-wrap: anywhere;
+      white-space: normal;
+      text-align: left;
     }
 
     .compact-metrics {
@@ -641,11 +677,13 @@
 
     @media (max-width: 560px) {
       .summary, .compact-metrics, .profile-grid { grid-template-columns: 1fr; }
-      .player-card { grid-template-columns: 1fr; }
+      .player-card, .team-card { grid-template-columns: 1fr; }
       .player-photo { width: 76px; height: 76px; border-radius: 14px; }
+      .team-crest { width: 76px; height: 76px; }
       .nav { grid-template-columns: 1fr; }
       .chart-wrap { height: 300px; }
       h1 { font-size: 36px; }
+      input, select, button { width: 100%; }
     }
   </style>
 </head>
@@ -944,6 +982,31 @@
       </section>
 
       <section id="predictions" class="section stack">
+        <article class="panel table-panel">
+          <div class="table-head">
+            <div>
+              <h2>Predicciones guardadas</h2>
+              <p class="muted">Todas las predicciones en PostgreSQL con filtros e hit rate por mercado</p>
+            </div>
+          </div>
+          <div style="padding: 0 20px 20px">
+            <div class="filters">
+              <input id="predictionDate" type="date" aria-label="Fecha de prediccion">
+              <select id="predictionLeague"><option value="">Liga</option></select>
+              <select id="predictionMarket"><option value="">Mercado</option></select>
+              <select id="predictionResult">
+                <option value="">Resultado</option>
+                <option value="acerto">Acerto</option>
+                <option value="fallo">Fallo</option>
+                <option value="pendiente">Pendiente</option>
+              </select>
+              <button type="button" onclick="loadPredictions()">Filtrar</button>
+            </div>
+            <div id="predictionMarkets" class="compact-metrics"></div>
+            <div id="predictionsResult" class="detail-box">Cargando predicciones...</div>
+          </div>
+        </article>
+
         <article class="panel table-panel">
           <div class="table-head">
             <div>
@@ -1282,6 +1345,12 @@
       return '<span class="badge pending">Pendiente</span>';
     }
 
+    function predictionBadge(value) {
+      if (value === true) return '<span class="badge win">Acerto</span>';
+      if (value === false) return '<span class="badge loss">Fallo</span>';
+      return '<span class="badge neutral">Pendiente</span>';
+    }
+
     async function loadMatches() {
       const params = new URLSearchParams();
       const date = document.getElementById('matchDate').value;
@@ -1331,7 +1400,7 @@
           return;
         }
         target.innerHTML = data.items.length
-          ? data.items.map(player => `<button class="ghost-button" type="button" onclick="loadPlayer(${player.id})">${na(player.name)}</button>`).join(' ')
+          ? `<div class="button-list">${data.items.map(player => `<button class="ghost-button" type="button" onclick="loadPlayer(${player.id})">${na(player.name)}</button>`).join(' ')}</div>`
           : '<p class="empty">No disponible</p>';
       } catch (err) {
         target.textContent = `Error: ${err.message}`;
@@ -1409,7 +1478,7 @@
           return;
         }
         target.innerHTML = data.items.length
-          ? data.items.map(team => `<button class="ghost-button" type="button" onclick="loadTeam(${team.id})">${na(team.name)}</button>`).join(' ')
+          ? `<div class="button-list">${data.items.map(team => `<button class="ghost-button" type="button" onclick="loadTeam(${team.id})"><img src="${team.crest}" alt="" style="width:24px;height:24px;object-fit:contain"> ${na(team.name)}</button>`).join(' ')}</div>`
           : '<p class="empty">No disponible</p>';
       } catch (err) {
         target.textContent = `Error: ${err.message}`;
@@ -1422,23 +1491,92 @@
       try {
         const data = await fetchJson(`/api/teams/${id}`);
         const team = data.team || {};
-        const squad = (team.squad || []).slice(0, 18).map(player => `<span class="badge neutral">${na(player.name)}</span>`).join(' ');
+        const squad = (team.squad || []).map(player => `<button class="ghost-button" type="button" onclick="loadPlayer(${player.id}); location.hash='players';">${na(player.name)}${player.position ? ` · ${player.position}` : ''}</button>`).join(' ');
+        const lastRows = (team.last_matches || []).map(match => `<tr>
+          <td class="numeric">${formatDate(match.date)}</td>
+          <td>${na(match.league)}</td>
+          <td>${na(match.venue)}</td>
+          <td>${na(match.rival)}</td>
+          <td>${na(match.result)}</td>
+          <td>${na(match.score?.outcome)}</td>
+        </tr>`);
         detail.innerHTML = `
-          <h2>${na(team.name)}</h2>
-          <p class="muted">${na(team.country)} · ${na(team.league)}</p>
-          <div class="compact-metrics">
-            <div class="mini-card"><div class="label">Corners favor</div><div class="value">${na(team.stats?.corners_for)}</div></div>
-            <div class="mini-card"><div class="label">Remates</div><div class="value">${na(team.stats?.shots)}</div></div>
-            <div class="mini-card"><div class="label">Predicciones</div><div class="value">${(team.predictions || []).length}</div></div>
-            <div class="mini-card"><div class="label">Forma</div><div class="value">${na(team.stats?.recent_form)}</div></div>
+          <div class="team-card">
+            <img class="team-crest" src="${team.crest}" alt="${na(team.name)}" onerror="this.style.visibility='hidden'">
+            <div>
+              <h2>${na(team.name)}</h2>
+              <p class="muted">${na(team.country)} &middot; ${na(team.league)}</p>
+            </div>
           </div>
+          <div class="compact-metrics">
+            <div class="mini-card"><div class="label">Goles prom.</div><div class="value">${na(team.stats?.goals_per_match)}</div></div>
+            <div class="mini-card"><div class="label">Corners prom.</div><div class="value">${na(team.stats?.corners_per_match)}</div></div>
+            <div class="mini-card"><div class="label">Remates prom.</div><div class="value">${na(team.stats?.shots_per_match)}</div></div>
+            <div class="mini-card"><div class="label">Predicciones</div><div class="value">${(team.predictions || []).length}</div></div>
+          </div>
+          <h2 style="margin-top:18px">Ultimos 5 partidos</h2>
+          ${table(['Fecha','Liga','Cond.','Rival','Resultado','Racha'], lastRows)}
           <h2 style="margin-top:18px">Plantel</h2>
-          <div class="filters">${squad || 'No disponible'}</div>
+          <div class="filters button-list">${squad || 'No disponible'}</div>
         `;
       } catch (err) {
         detail.textContent = `Error: ${err.message}`;
       }
     }
+
+    async function loadPredictions() {
+      const params = new URLSearchParams();
+      const date = document.getElementById('predictionDate').value;
+      const league = document.getElementById('predictionLeague').value;
+      const market = document.getElementById('predictionMarket').value;
+      const result = document.getElementById('predictionResult').value;
+      if (date) params.set('date', date);
+      if (league) params.set('league', league);
+      if (market) params.set('market', market);
+      if (result) params.set('result', result);
+      params.set('limit', '200');
+      const target = document.getElementById('predictionsResult');
+      target.innerHTML = loading();
+      try {
+        const data = await fetchJson(`/api/predictions?${params.toString()}`);
+        if (!data.available) {
+          target.textContent = data.error || 'No disponible';
+          return;
+        }
+        populatePredictionFilters(data.filters || {});
+        const marketBox = document.getElementById('predictionMarkets');
+        marketBox.innerHTML = (data.market_hit_rates || []).slice(0, 8).map(item => `
+          <div class="mini-card"><div class="label">${na(item.market)}</div><div class="value">${na(item.hit_rate)}%</div><p class="sub">${item.won} aciertos · ${item.lost} fallos · ${item.pending} pend.</p></div>
+        `).join('');
+        const rows = (data.predictions || []).map(prediction => `<tr>
+          <td class="numeric">${formatDate(prediction.predicted_at, true)}</td>
+          <td>${na(prediction.match)}</td>
+          <td>${na(prediction.league)}</td>
+          <td><span class="badge neutral">${na(prediction.market)}</span></td>
+          <td>${na(prediction.pick_type)}</td>
+          <td class="numeric">${prediction.probability === null || prediction.probability === undefined ? 'N/D' : `${(prediction.probability * 100).toFixed(1)}%`}</td>
+          <td class="numeric">${prediction.real_odds ? `@${prediction.real_odds.toFixed(2)}` : 'N/D'}</td>
+          <td class="numeric ${Number(prediction.value_score || 0) > 0 ? 'positive' : ''}">${Number(prediction.value_score || 0).toFixed(3)}</td>
+          <td>${predictionBadge(prediction.correct)}</td>
+        </tr>`);
+        target.innerHTML = table(['Fecha','Partido','Liga','Mercado','Pick','Prob.','Cuota','Value','Resultado'], rows);
+      } catch (err) {
+        target.textContent = `Error: ${err.message}`;
+      }
+    }
+
+    function populatePredictionFilters(filters) {
+      const leagueSelect = document.getElementById('predictionLeague');
+      const marketSelect = document.getElementById('predictionMarket');
+      const selectedLeague = leagueSelect.value;
+      const selectedMarket = marketSelect.value;
+      leagueSelect.innerHTML = '<option value="">Liga</option>' + (filters.leagues || []).map(value => `<option value="${value}">${value}</option>`).join('');
+      marketSelect.innerHTML = '<option value="">Mercado</option>' + (filters.markets || []).map(value => `<option value="${value}">${value}</option>`).join('');
+      leagueSelect.value = selectedLeague;
+      marketSelect.value = selectedMarket;
+    }
+
+    loadPredictions();
   </script>
 </body>
 </html>

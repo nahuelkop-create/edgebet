@@ -184,7 +184,7 @@ def _latest_odds_payload(session, fixture_id: int) -> list[dict]:
 
 
 def _prediction_payload(row: Prediction) -> dict:
-    return {
+    payload = {
         "id": row.id,
         "fixture_id": row.fixture_id,
         "market": row.market,
@@ -206,6 +206,58 @@ def _prediction_payload(row: Prediction) -> dict:
         "predicted_at": _iso(row.predicted_at),
         "settled_at": _iso(row.settled_at),
     }
+    return payload
+
+
+def _prediction_payload_with_fixture(session, row: Prediction) -> dict:
+    payload = _prediction_payload(row)
+    fixture = session.get(Fixture, row.fixture_id) if row.fixture_id else None
+    if fixture:
+        payload.update({
+            "fixture_date": _iso(fixture.date),
+            "home_team": fixture.home_team,
+            "away_team": fixture.away_team,
+            "match": f"{fixture.home_team} vs {fixture.away_team}",
+            "result": fixture.result,
+            "status": fixture.status,
+        })
+    else:
+        payload.update({
+            "fixture_date": None,
+            "home_team": None,
+            "away_team": None,
+            "match": "No disponible",
+            "result": None,
+            "status": None,
+        })
+    return payload
+
+
+def _prediction_result_label(row: Prediction) -> str:
+    if row.correct is True:
+        return "acerto"
+    if row.correct is False:
+        return "fallo"
+    return "pendiente"
+
+
+def _market_hit_rates(session) -> list[dict]:
+    rows = session.scalars(select(Prediction)).all()
+    buckets: dict[str, dict] = {}
+    for row in rows:
+        market = row.market or "N/D"
+        bucket = buckets.setdefault(market, {"market": market, "won": 0, "lost": 0, "pending": 0})
+        if row.correct is True:
+            bucket["won"] += 1
+        elif row.correct is False:
+            bucket["lost"] += 1
+        else:
+            bucket["pending"] += 1
+    for bucket in buckets.values():
+        settled = bucket["won"] + bucket["lost"]
+        bucket["total"] = settled + bucket["pending"]
+        bucket["hit_rate"] = round(bucket["won"] / settled * 100, 1) if settled else 0.0
+    return sorted(buckets.values(), key=lambda item: (item["total"], item["market"]), reverse=True)
 
 
 def _fixture_payload(session, fixture: Fixture, include_details: bool = False) -> dict:
@@ -514,6 +566,10 @@ def _player_photo_url(player_id: int) -> str:
     return f"https://media.api-sports.io/football/players/{player_id}.png"
 
 
+def _team_crest_url(team_id: int) -> str:
+    return f"https://media.api-sports.io/football/teams/{team_id}.png"
+
+
 def _sum_numbers(rows, attr: str):
     values = [getattr(row, attr) for row in rows if getattr(row, attr) is not None]
     return sum(values) if values else None
@@ -522,6 +578,54 @@ def _sum_numbers(rows, attr: str):
 def _avg_numbers(rows, attr: str):
     values = [getattr(row, attr) for row in rows if getattr(row, attr) is not None]
     return round(sum(values) / len(values), 2) if values else None
+
+
+def _score_for_team(fixture: Fixture, team_name: str) -> dict:
+    score = _fixture_score(fixture)
+    home_goals = score.get("home")
+    away_goals = score.get("away")
+    outcome = "N/D"
+    if isinstance(home_goals, int) and isinstance(away_goals, int):
+        is_home = fixture.home_team == team_name
+        team_goals = home_goals if is_home else away_goals
+        rival_goals = away_goals if is_home else home_goals
+        if team_goals > rival_goals:
+            outcome = "G"
+        elif team_goals < rival_goals:
+            outcome = "P"
+        else:
+            outcome = "E"
+    return {"home": home_goals, "away": away_goals, "outcome": outcome}
+
+
+def _team_fixture_payload(fixture: Fixture, team_name: str) -> dict:
+    score = _score_for_team(fixture, team_name)
+    rival = fixture.away_team if fixture.home_team == team_name else fixture.home_team
+    venue = "Local" if fixture.home_team == team_name else "Visitante"
+    return {
+        "id": fixture.id,
+        "date": _iso(fixture.date),
+        "league": fixture.league,
+        "home_team": fixture.home_team,
+        "away_team": fixture.away_team,
+        "rival": rival,
+        "venue": venue,
+        "status": fixture.status,
+        "result": fixture.result,
+        "score": score,
+    }
+
+
+def _team_average_goals(fixtures: list[Fixture], team_name: str) -> float | None:
+    goals = []
+    for fixture in fixtures:
+        score = _fixture_score(fixture)
+        home_goals = score.get("home")
+        away_goals = score.get("away")
+        if not isinstance(home_goals, int) or not isinstance(away_goals, int):
+            continue
+        goals.append(home_goals if fixture.home_team == team_name else away_goals)
+    return round(sum(goals) / len(goals), 2) if goals else None
 
 
 @app.get("/api/players/<int:player_id>")
@@ -684,7 +788,15 @@ def api_teams_search():
         rows = session.scalars(query.order_by(Team.name.asc()).offset(offset).limit(limit)).all()
         return jsonify({
             "available": True,
-            "items": [{"id": row.id, "name": row.name, "league": row.league} for row in rows],
+            "items": [
+                {
+                    "id": row.id,
+                    "name": row.name,
+                    "league": row.league,
+                    "crest": _team_crest_url(row.id),
+                }
+                for row in rows
+            ],
         })
 
 
@@ -712,6 +824,8 @@ def api_team_detail(team_id: int):
             .order_by(Prediction.predicted_at.desc())
             .limit(20)
         ).all()
+        finished_fixtures = [row for row in fixtures if row.status in FINISHED_STATUSES]
+        avg_goals = _team_average_goals(finished_fixtures[:5], team.name)
         return jsonify({
             "available": True,
             "team": {
@@ -719,23 +833,29 @@ def api_team_detail(team_id: int):
                 "name": team.name,
                 "country": None,
                 "league": team.league,
-                "crest": None,
+                "crest": _team_crest_url(team.id),
+                "logo": _team_crest_url(team.id),
                 "squad": [
                     {
                         "id": player.id,
                         "name": player.name,
                         "position": player.position,
                         "nationality": player.nationality,
+                        "url": f"#players",
+                        "profile_api": f"/api/players/{player.id}",
                     }
                     for player in players
                 ],
                 "upcoming_matches": [_fixture_payload(session, row) for row in fixtures if row.status in UPCOMING_STATUSES][:5],
-                "last_matches": [_fixture_payload(session, row) for row in fixtures if row.status in FINISHED_STATUSES][:5],
+                "last_matches": [_team_fixture_payload(row, team.name) for row in finished_fixtures[:5]],
                 "stats": {
-                    "goals_for": None,
+                    "goals_per_match": avg_goals,
+                    "goals_for": avg_goals,
                     "goals_against": None,
+                    "corners_per_match": round(sum(row.corners or 0 for row in stats) / len(stats), 2) if stats else None,
                     "corners_for": round(sum(row.corners or 0 for row in stats) / len(stats), 2) if stats else None,
                     "corners_against": None,
+                    "shots_per_match": round(sum(row.shots or 0 for row in stats) / len(stats), 2) if stats else None,
                     "shots": round(sum(row.shots or 0 for row in stats) / len(stats), 2) if stats else None,
                     "shots_against": None,
                     "cards": None,
@@ -771,6 +891,13 @@ def api_predictions():
             query = query.where(Prediction.model_name == request.args["model"])
         if request.args.get("date"):
             query = query.where(func.date(Prediction.predicted_at) == request.args["date"])
+        result = request.args.get("result")
+        if result in {"acerto", "ganada", "won"}:
+            query = query.where(Prediction.correct.is_(True))
+        elif result in {"fallo", "perdida", "lost"}:
+            query = query.where(Prediction.correct.is_(False))
+        elif result in {"pendiente", "pending"}:
+            query = query.where(Prediction.correct.is_(None))
         if request.args.get("min_confidence"):
             try:
                 query = query.where(Prediction.confidence >= float(request.args["min_confidence"]))
@@ -783,7 +910,19 @@ def api_predictions():
         if correct is not None:
             query = query.where(Prediction.correct.is_(correct))
         rows = session.scalars(query.order_by(Prediction.predicted_at.desc()).offset(offset).limit(limit)).all()
-        return jsonify({"available": True, "limit": limit, "offset": offset, "predictions": [_prediction_payload(row) for row in rows]})
+        leagues = session.scalars(select(distinct(Prediction.league)).where(Prediction.league.is_not(None))).all()
+        markets = session.scalars(select(distinct(Prediction.market)).where(Prediction.market.is_not(None))).all()
+        return jsonify({
+            "available": True,
+            "limit": limit,
+            "offset": offset,
+            "predictions": [_prediction_payload_with_fixture(session, row) for row in rows],
+            "market_hit_rates": _market_hit_rates(session),
+            "filters": {
+                "leagues": [league for league in leagues if league],
+                "markets": [market for market in markets if market],
+            },
+        })
 
 
 @app.get("/api/value-bets")

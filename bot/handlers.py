@@ -73,10 +73,7 @@ PICK_LEAGUES = [
 ]
 PICK_LEAGUE_BY_KEY = {league["key"]: league for league in PICK_LEAGUES}
 ALL_LEAGUES_KEY = "all"
-API_LIMIT_MESSAGE = (
-    "⚠️ Servicio temporalmente no disponible. Los requests de la API se renuevan "
-    "a las 00:00 UTC. Intentá de nuevo más tarde."
-)
+API_LIMIT_MESSAGE = "⚠️ API temporalmente no disponible"
 
 USER_STATE: Dict[int, Dict[str, Any]] = {}
 
@@ -93,6 +90,17 @@ def _is_live(status: Any) -> bool:
 def _is_api_limit_error(exc: RuntimeError) -> bool:
     message = str(exc).lower()
     return "api-football error" in message and "requests" in message and "limit" in message
+
+
+def _is_api_error(exc: RuntimeError) -> bool:
+    message = str(exc).lower()
+    return (
+        _is_api_limit_error(exc)
+        or "api-football" in message
+        or "api_football" in message
+        or "api-football_key" in message
+        or "api_football_key" in message
+    )
 
 
 def arg_to_date(arg: str) -> Optional[str]:
@@ -124,7 +132,7 @@ def build_league_buttons(date_str: str) -> InlineKeyboardMarkup:
         [InlineKeyboardButton(league["label"], callback_data=f"league_{date_str}_{league['key']}")]
         for league in PICK_LEAGUES
     ]
-    buttons.append([InlineKeyboardButton("Ver todos los partidos", callback_data=f"league_{date_str}_{ALL_LEAGUES_KEY}")])
+    buttons.append([InlineKeyboardButton("Todos los partidos", callback_data=f"league_{date_str}_{ALL_LEAGUES_KEY}")])
     buttons.append([InlineKeyboardButton("← Volver", callback_data="picks_menu")])
     return InlineKeyboardMarkup(buttons)
 
@@ -132,7 +140,8 @@ def build_league_buttons(date_str: str) -> InlineKeyboardMarkup:
 def league_label(league_key: str) -> str:
     if league_key == ALL_LEAGUES_KEY:
         return "Todos los partidos"
-    return PICK_LEAGUE_BY_KEY.get(league_key, {}).get("label", "Liga")
+    label = PICK_LEAGUE_BY_KEY.get(league_key, {}).get("label", "Liga")
+    return re.sub(r"[^\w\s/.-]", "", label).strip() or "Liga"
 
 
 def format_fixtures_text(fixtures: list, date_str: str) -> str:
@@ -1018,12 +1027,12 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         try:
             fixtures = get_fixtures_for_date(date_str, league_key)
         except RuntimeError as exc:
-            if _is_api_limit_error(exc):
+            if _is_api_error(exc):
                 return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not fixtures:
             return await _edit_message_text(query, 
-                f"No hay partidos disponibles para {league_label(league_key)} el {date_str}.",
+                f"No hay partidos de {league_label(league_key)} para esta fecha",
                 reply_markup=build_league_buttons(date_str),
             )
 
@@ -1047,7 +1056,7 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         try:
             match = _resolve_match(state, date_str, league_key, match_id)
         except RuntimeError as exc:
-            if _is_api_limit_error(exc):
+            if _is_api_error(exc):
                 return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not match:
@@ -1071,7 +1080,7 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         try:
             match = _resolve_match(state, date_str, league_key, match_id)
         except RuntimeError as exc:
-            if _is_api_limit_error(exc):
+            if _is_api_error(exc):
                 return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not match:
@@ -1098,7 +1107,7 @@ async def handle_picks_callback_v2(update: Update, context: ContextTypes.DEFAULT
         try:
             match = _resolve_match(state, date_str, league_key, match_id)
         except RuntimeError as exc:
-            if _is_api_limit_error(exc):
+            if _is_api_error(exc):
                 return await _edit_message_text(query, API_LIMIT_MESSAGE)
             raise
         if not match:

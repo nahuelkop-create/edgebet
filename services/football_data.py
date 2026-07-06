@@ -25,6 +25,7 @@ COMPETITIONS = {
     "Copa Libertadores": "144",
     "Liga Profesional Argentina": "128",
 }
+CHAMPIONS_LEAGUE_ID = 2
 
 
 def _get(path: str, params: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
@@ -908,7 +909,13 @@ def get_team_stats(team_id: int, league_id: int = WORLD_CUP_LEAGUE_ID, season: i
     return stats
 
 
-def get_team_recent_matches(team_id: int, limit: int = 5, date_to: Optional[str] = None) -> List[Dict[str, Any]]:
+def get_team_recent_matches(
+    team_id: int,
+    limit: int = 5,
+    date_to: Optional[str] = None,
+    league_id: Optional[int] = None,
+    season: Optional[int] = None,
+) -> List[Dict[str, Any]]:
     """Get the team's most recent matches across all competitions (real data).
 
     Uses the `last` filter so we get genuine recent form, not only World Cup games.
@@ -918,6 +925,10 @@ def get_team_recent_matches(team_id: int, limit: int = 5, date_to: Optional[str]
             "team": team_id,
             "last": limit,
         }
+        if league_id:
+            params["league"] = league_id
+        if season:
+            params["season"] = season
         data = _get("/fixtures", params=params)
         
         matches = []
@@ -951,6 +962,51 @@ def get_team_recent_matches(team_id: int, limit: int = 5, date_to: Optional[str]
         return []
     except Exception:
         return []
+
+
+def get_league_standings(league_id: int, season: int) -> Dict[str, Any]:
+    """Return a flattened league table for domestic league context."""
+    try:
+        data = _get("/standings", params={"league": league_id, "season": season})
+    except Exception:
+        return {}
+
+    for standing in data.get("response", []):
+        league = standing.get("league", {}) or {}
+        tables = league.get("standings", []) or []
+        if not tables:
+            continue
+        table = []
+        for row in tables[0] or []:
+            table.append({
+                "position": row.get("rank"),
+                "team": {
+                    "id": row.get("team", {}).get("id"),
+                    "name": row.get("team", {}).get("name"),
+                },
+                "points": row.get("points"),
+                "playedGames": row.get("all", {}).get("played", 0),
+                "won": row.get("all", {}).get("win", 0),
+                "draw": row.get("all", {}).get("draw", 0),
+                "lost": row.get("all", {}).get("lose", 0),
+                "goalsFor": row.get("all", {}).get("goals", {}).get("for", 0),
+                "goalsAgainst": row.get("all", {}).get("goals", {}).get("against", 0),
+                "form": row.get("form"),
+            })
+        return {"league": league.get("name"), "season": season, "table": table}
+    return {}
+
+
+def team_has_champions_league(team_id: int, season: int) -> bool:
+    """Whether the team has Champions League fixtures in the same season."""
+    try:
+        data = _get(
+            "/fixtures",
+            params={"team": team_id, "league": CHAMPIONS_LEAGUE_ID, "season": season},
+        )
+    except Exception:
+        return False
+    return bool(data.get("response"))
 
 
 def get_group_standings(competition_id: str, group_code: str) -> Dict[str, Any]:
