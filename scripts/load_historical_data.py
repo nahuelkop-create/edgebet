@@ -24,7 +24,11 @@ load_dotenv(ROOT_DIR / ".env")
 BASE_URL = "https://v3.football.api-sports.io"
 API_KEY = os.getenv("API_FOOTBALL_KEY", "").replace(" ", "").strip()
 HEADERS = {"x-apisports-key": API_KEY} if API_KEY else {}
-REQUEST_SLEEP_SECONDS = 0.5
+REQUEST_SLEEP_SECONDS = 2
+RATE_LIMIT_RETRY_SECONDS = 60
+MAX_RATE_LIMIT_RETRIES = 3
+REQUEST_BATCH_LIMIT = 500
+REQUEST_BATCH_PAUSE_SECONDS = 600
 FINISHED_STATUSES = {"FT", "AET", "PEN"}
 
 LEAGUES = (
@@ -36,21 +40,39 @@ LEAGUES = (
 )
 
 REQUESTS_USED = 0
+REQUESTS_SINCE_PAUSE = 0
 
 
 def _request(path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
-    global REQUESTS_USED
+    global REQUESTS_USED, REQUESTS_SINCE_PAUSE
     if not API_KEY:
         raise RuntimeError("API_FOOTBALL_KEY no esta definido")
-    time.sleep(REQUEST_SLEEP_SECONDS)
-    REQUESTS_USED += 1
-    response = requests.get(f"{BASE_URL}{path}", headers=HEADERS, params=params or {}, timeout=30)
-    response.raise_for_status()
-    payload = response.json()
-    errors = payload.get("errors") if isinstance(payload, dict) else None
-    if errors:
-        raise RuntimeError(f"API-Football error {path}: {errors}")
-    return payload
+
+    for attempt in range(1, MAX_RATE_LIMIT_RETRIES + 2):
+        if REQUESTS_SINCE_PAUSE >= REQUEST_BATCH_LIMIT:
+            print(f"Requests usados desde la ultima pausa: {REQUESTS_SINCE_PAUSE}. Pausando 10 minutos...")
+            time.sleep(REQUEST_BATCH_PAUSE_SECONDS)
+            REQUESTS_SINCE_PAUSE = 0
+
+        time.sleep(REQUEST_SLEEP_SECONDS)
+        REQUESTS_USED += 1
+        REQUESTS_SINCE_PAUSE += 1
+        response = requests.get(f"{BASE_URL}{path}", headers=HEADERS, params=params or {}, timeout=30)
+        if response.status_code == 429 and attempt <= MAX_RATE_LIMIT_RETRIES:
+            print(
+                f"Rate limit 429 en {path}. Esperando {RATE_LIMIT_RETRY_SECONDS}s "
+                f"antes de reintentar ({attempt}/{MAX_RATE_LIMIT_RETRIES})..."
+            )
+            time.sleep(RATE_LIMIT_RETRY_SECONDS)
+            continue
+        response.raise_for_status()
+        payload = response.json()
+        errors = payload.get("errors") if isinstance(payload, dict) else None
+        if errors:
+            raise RuntimeError(f"API-Football error {path}: {errors}")
+        return payload
+
+    raise RuntimeError(f"API-Football rate limit persistente en {path}")
 
 
 def _to_int(value) -> int | None:
@@ -283,7 +305,8 @@ def main() -> int:
             )
             fixtures = data.get("response", []) or []
             print(f"  Fixtures recibidos: {len(fixtures)}")
-            for raw in fixtures:
+            for fixture_idx, raw in enumerate(fixtures, 1):
+                print(f"  Procesando fixture {fixture_idx}/{len(fixtures)}...")
                 if _upsert_fixture(session, raw, league["name"]):
                     fixtures_loaded += 1
                 teams = raw.get("teams", {}) or {}
