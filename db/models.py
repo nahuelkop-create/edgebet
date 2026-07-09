@@ -63,6 +63,7 @@ class PlayerStat(Base):
     __tablename__ = "player_stats"
     __table_args__ = (
         Index("ix_player_stats_fixture_player", "fixture_id", "player_id"),
+        UniqueConstraint("fixture_id", "player_id", name="uq_player_stats_fixture_player"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -118,6 +119,47 @@ class TeamStat(Base):
     possession: Mapped[float | None] = mapped_column(Float)
     shots: Mapped[int | None] = mapped_column(Integer)
     fouls: Mapped[int | None] = mapped_column(Integer)
+
+
+class GameEvent(Base):
+    __tablename__ = "game_events"
+    __table_args__ = (
+        UniqueConstraint("source", "source_event_id", name="uq_game_events_source_event"),
+        Index("ix_game_events_fixture_id", "fixture_id"),
+        Index("ix_game_events_player_id", "player_id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_event_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    fixture_id: Mapped[int | None] = mapped_column(ForeignKey("fixtures.id"))
+    team_id: Mapped[int | None] = mapped_column(ForeignKey("teams.id"))
+    player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    related_player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    minute: Mapped[int | None] = mapped_column(Integer)
+    event_type: Mapped[str | None] = mapped_column(String(100))
+    description: Mapped[str | None] = mapped_column(String(500))
+    event_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PlayerAttribute(Base):
+    __tablename__ = "player_attributes"
+    __table_args__ = (
+        UniqueConstraint("source", "source_attribute_id", name="uq_player_attributes_source_attribute"),
+        Index("ix_player_attributes_player_id", "player_id"),
+        Index("ix_player_attributes_date", "attribute_date"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    source: Mapped[str] = mapped_column(String(50), nullable=False)
+    source_attribute_id: Mapped[str] = mapped_column(String(100), nullable=False)
+    player_id: Mapped[int | None] = mapped_column(ForeignKey("players.id"))
+    attribute_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    overall_rating: Mapped[int | None] = mapped_column(Integer)
+    potential: Mapped[int | None] = mapped_column(Integer)
+    preferred_foot: Mapped[str | None] = mapped_column(String(50))
+    attacking_work_rate: Mapped[str | None] = mapped_column(String(50))
+    defensive_work_rate: Mapped[str | None] = mapped_column(String(50))
 
 
 class OddsSnapshot(Base):

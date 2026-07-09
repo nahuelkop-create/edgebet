@@ -63,6 +63,39 @@ def _apply_incremental_migrations(engine) -> None:
         conn.execute(text("ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS minutes INTEGER"))
         conn.execute(text("ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS yellow_cards INTEGER"))
         conn.execute(text("ALTER TABLE player_stats ADD COLUMN IF NOT EXISTS red_cards INTEGER"))
+        conn.execute(
+            text(
+                "DELETE FROM player_stats p "
+                "USING player_stats q "
+                "WHERE p.fixture_id = q.fixture_id "
+                "AND p.player_id = q.player_id "
+                "AND p.id < q.id "
+                "AND p.fixture_id IS NOT NULL "
+                "AND p.player_id IS NOT NULL"
+            )
+        )
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_stats_fixture_player "
+                "ON player_stats (fixture_id, player_id)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_game_events_fixture_id ON game_events (fixture_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_game_events_player_id ON game_events (player_id)"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_game_events_source_event "
+                "ON game_events (source, source_event_id)"
+            )
+        )
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_player_attributes_player_id ON player_attributes (player_id)"))
+        conn.execute(text("CREATE INDEX IF NOT EXISTS ix_player_attributes_date ON player_attributes (attribute_date)"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS uq_player_attributes_source_attribute "
+                "ON player_attributes (source, source_attribute_id)"
+            )
+        )
         # Drop pre-existing duplicate predictions (keep the latest row per
         # fixture+market) before enforcing uniqueness, otherwise the index
         # creation would fail on legacy data.
