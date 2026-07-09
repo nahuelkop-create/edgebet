@@ -263,12 +263,24 @@ def _market_hit_rates(session) -> list[dict]:
 def _fixture_payload(session, fixture: Fixture, include_details: bool = False) -> dict:
     stats = list(session.scalars(select(TeamStat).where(TeamStat.fixture_id == fixture.id)).all())
     prediction_rows = session.scalars(select(Prediction).where(Prediction.fixture_id == fixture.id)).all()
+    teams_by_name = {
+        team.name: team
+        for team in session.scalars(
+            select(Team).where(Team.name.in_([fixture.home_team, fixture.away_team]))
+        ).all()
+    }
+    home_team = teams_by_name.get(fixture.home_team)
+    away_team = teams_by_name.get(fixture.away_team)
     payload = {
         "id": fixture.id,
         "date": _iso(fixture.date),
         "league": fixture.league,
         "home_team": fixture.home_team,
         "away_team": fixture.away_team,
+        "home_team_id": home_team.id if home_team else None,
+        "away_team_id": away_team.id if away_team else None,
+        "home_crest": _team_crest_url(home_team.id) if home_team else None,
+        "away_crest": _team_crest_url(away_team.id) if away_team else None,
         "result": fixture.result,
         "score": _fixture_score(fixture),
         "status": fixture.status,
@@ -540,15 +552,19 @@ def api_players_search():
         if q:
             query = query.where(Player.name.ilike(f"%{q}%"))
         rows = session.scalars(query.order_by(Player.name.asc()).offset(offset).limit(limit)).all()
-        items = [
-            {
+        items = []
+        for row in rows:
+            team = session.get(Team, row.team_id) if row.team_id else None
+            items.append({
                 "id": row.id,
                 "name": row.name,
                 "team_id": row.team_id,
+                "team": team.name if team else "No disponible",
+                "league": team.league if team else None,
                 "position": row.position,
-            }
-            for row in rows
-        ]
+                "nationality": row.nationality,
+                "photo": _player_photo_url(row.id),
+            })
         return jsonify({"available": True, "limit": limit, "offset": offset, "items": items})
 
 
@@ -841,6 +857,7 @@ def api_team_detail(team_id: int):
                         "name": player.name,
                         "position": player.position,
                         "nationality": player.nationality,
+                        "photo": _player_photo_url(player.id),
                         "url": f"#players",
                         "profile_api": f"/api/players/{player.id}",
                     }
@@ -923,6 +940,53 @@ def api_predictions():
                 "markets": [market for market in markets if market],
             },
         })
+
+
+@app.get("/api/search")
+def api_global_search():
+    session, error = _pg_session()
+    if session is None:
+        return _pg_unavailable(error)
+    q = request.args.get("q", "").strip()
+    if len(q) < 2:
+        return jsonify({"available": True, "items": []})
+    term = f"%{q}%"
+    with session:
+        players = session.scalars(select(Player).where(Player.name.ilike(term)).order_by(Player.name.asc()).limit(6)).all()
+        teams = session.scalars(select(Team).where(Team.name.ilike(term)).order_by(Team.name.asc()).limit(6)).all()
+        fixtures = session.scalars(
+            select(Fixture)
+            .where(or_(Fixture.home_team.ilike(term), Fixture.away_team.ilike(term), Fixture.league.ilike(term)))
+            .order_by(Fixture.date.desc())
+            .limit(6)
+        ).all()
+        items = []
+        for player in players:
+            team = session.get(Team, player.team_id) if player.team_id else None
+            items.append({
+                "type": "player",
+                "id": player.id,
+                "label": player.name,
+                "meta": " · ".join(part for part in [player.position, team.name if team else None, team.league if team else None] if part),
+                "image": _player_photo_url(player.id),
+            })
+        for team in teams:
+            items.append({
+                "type": "team",
+                "id": team.id,
+                "label": team.name,
+                "meta": team.league,
+                "image": _team_crest_url(team.id),
+            })
+        for fixture in fixtures:
+            items.append({
+                "type": "match",
+                "id": fixture.id,
+                "label": f"{fixture.home_team} vs {fixture.away_team}",
+                "meta": " · ".join(part for part in [fixture.league, fixture.status, _format_date_es(fixture.date, with_time=True)] if part),
+                "image": None,
+            })
+        return jsonify({"available": True, "items": items})
 
 
 @app.get("/api/value-bets")
