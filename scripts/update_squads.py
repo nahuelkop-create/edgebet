@@ -23,18 +23,25 @@ load_dotenv(ROOT_DIR / ".env")
 BASE_URL = "https://v3.football.api-sports.io"
 API_KEY = os.getenv("API_FOOTBALL_KEY", "").replace(" ", "").strip()
 HEADERS = {"x-apisports-key": API_KEY} if API_KEY else {}
-SEASON = 2026
 REQUEST_SLEEP_SECONDS = 1
 MAX_RETRIES = 3
 
 TEAMS = (
-    {"id": 432, "name": "Boca Juniors"},
-    {"id": 435, "name": "River Plate"},
-    {"id": 26, "name": "Argentina"},
-    {"id": 541, "name": "Real Madrid"},
-    {"id": 529, "name": "Barcelona"},
-    {"id": 50, "name": "Manchester City"},
-    {"id": 40, "name": "Liverpool"},
+    {"id": 451, "name": "Boca Juniors", "season": 2026},
+    {"id": 435, "name": "River Plate", "season": 2026},
+    {"id": 453, "name": "Independiente", "season": 2026},
+    {"id": 460, "name": "San Lorenzo", "season": 2026},
+    {"id": 436, "name": "Racing Club", "season": 2026},
+    {"id": 450, "name": "Estudiantes L.P.", "season": 2026},
+    {"id": 26, "name": "Argentina", "season": 2026},
+    {"id": 541, "name": "Real Madrid", "season": 2025},
+    {"id": 529, "name": "Barcelona", "season": 2025},
+    {"id": 530, "name": "Atletico Madrid", "season": 2025},
+    {"id": 50, "name": "Manchester City", "season": 2025},
+    {"id": 40, "name": "Liverpool", "season": 2025},
+    {"id": 157, "name": "Bayern Munich", "season": 2025},
+    {"id": 85, "name": "PSG", "season": 2025},
+    {"id": 496, "name": "Juventus", "season": 2025},
 )
 
 
@@ -118,14 +125,14 @@ def _upsert_player(session, player_payload: dict[str, Any], team_id: int, positi
     return True
 
 
-def update_team_squad(session, team_id: int, fallback_name: str) -> int:
+def update_team_squad(session, team_id: int, fallback_name: str, season: int) -> int:
     saved = 0
     page = 1
     team_name = fallback_name
     league_name = None
 
     while True:
-        payload = _request("/players", {"team": team_id, "season": SEASON, "page": page})
+        payload = _request("/players", {"team": team_id, "season": season, "page": page})
         rows = payload.get("response", []) or []
         paging = payload.get("paging", {}) or {}
         current = int(paging.get("current") or page)
@@ -165,9 +172,9 @@ def main() -> int:
     failures = 0
     with get_session() as session:
         for idx, team in enumerate(TEAMS, 1):
-            print(f"[{idx}/{len(TEAMS)}] Actualizando {team['name']} id={team['id']} season={SEASON}")
+            print(f"[{idx}/{len(TEAMS)}] Actualizando {team['name']} id={team['id']} season={team['season']}")
             try:
-                count = update_team_squad(session, team["id"], team["name"])
+                count = update_team_squad(session, team["id"], team["name"], team["season"])
                 total_saved += count
                 print(f"  Guardados/actualizados: {count}")
             except Exception:
@@ -177,7 +184,7 @@ def main() -> int:
 
     print("")
     print("Resumen update_squads")
-    print(f"Temporada: {SEASON}")
+    print("Temporadas: " + ", ".join(f"{team['name']}={team['season']}" for team in TEAMS))
     print(f"Equipos procesados: {len(TEAMS) - failures}/{len(TEAMS)}")
     print(f"Jugadores guardados/actualizados: {total_saved}")
     print(f"Errores: {failures}")
