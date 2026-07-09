@@ -1154,16 +1154,22 @@
 
     async function loadOverview() {
       try {
-        const [overview, summary, predictions, valueBets] = await Promise.all([
+        const [overviewResult, summaryResult, predictionsResult, valueBetsResult] = await Promise.allSettled([
           fetchJson('/api/stats/overview'),
           fetchJson('/api/dashboard/summary'),
           fetchJson('/api/predictions?limit=1'),
           fetchJson('/api/value-bets?limit=1')
         ]);
+        const overview = overviewResult.status === 'fulfilled' ? overviewResult.value : {};
+        const summary = summaryResult.status === 'fulfilled' ? summaryResult.value : {};
+        const predictions = predictionsResult.status === 'fulfilled' ? predictionsResult.value : {};
+        const valueBets = valueBetsResult.status === 'fulfilled' ? valueBetsResult.value : {};
         if (overview.available) {
           document.getElementById('playersCount').textContent = overview.players ?? '0';
         }
-        document.getElementById('todayCount').textContent = summary.matches?.today ?? '0';
+        if (summary.matches) {
+          document.getElementById('todayCount').textContent = summary.matches.today ?? '0';
+        }
         document.getElementById('predictionsCount').textContent = predictions.available ? ((predictions.offset || 0) + (predictions.predictions || []).length) : document.getElementById('predictionsCount').textContent;
         document.getElementById('valueBetsCount').textContent = valueBets.available ? (valueBets.performance?.total_value_bets ?? valueBets.picks?.length ?? '0') : document.getElementById('valueBetsCount').textContent;
       } catch (err) {
@@ -1188,6 +1194,7 @@
               <span class="badge red">${na(player.position)}</span>
               <h3>${na(player.name)}</h3>
               <p class="sub">${na(player.team)} · ${na(player.league)}</p>
+              <p class="sub">${na(player.stats_count)} stats · ${na(player.goals)} G · ${na(player.assists)} A · ${na(player.rating)} rating</p>
             </div>
           </button>
         `).join('') || '<div class="empty">No se encontraron jugadores.</div>';

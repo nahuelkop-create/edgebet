@@ -5,7 +5,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, request
-from sqlalchemy import distinct, func, or_, select
+from sqlalchemy import distinct, func, nullslast, or_, select
 
 ROOT_DIR = Path(__file__).resolve().parents[1]
 if str(ROOT_DIR) not in sys.path:
@@ -129,7 +129,12 @@ def _pg_session():
 
 
 def _pg_unavailable(error: str):
-    return jsonify({"available": False, "error": error, "items": []})
+    return jsonify({
+        "available": False,
+        "error": error,
+        "items": [],
+        "hint": "Configura DATABASE_URL o POSTGRES_URL para leer los datos de PostgreSQL.",
+    })
 
 
 def _fixture_score(fixture: Fixture) -> dict:
@@ -439,7 +444,7 @@ def _dashboard_matches() -> dict:
         return {"today": [], "upcoming": [], "finished": [], "error": error}
     today = datetime.utcnow().date()
     with session:
-        all_rows = session.scalars(select(Fixture).order_by(Fixture.date.desc()).limit(300)).all()
+        all_rows = session.scalars(select(Fixture).order_by(nullslast(Fixture.date.desc())).limit(300)).all()
         today_rows = [row for row in all_rows if row.date and row.date.date() == today]
         upcoming = [row for row in sorted(all_rows, key=lambda item: _sort_timestamp(item.date, float("inf"))) if row.status in UPCOMING_STATUSES][:12]
         finished = [row for row in all_rows if row.status in FINISHED_STATUSES][:12]
@@ -516,7 +521,7 @@ def api_matches():
         if request.args.get("team"):
             term = f"%{request.args['team']}%"
             query = query.where(or_(Fixture.home_team.ilike(term), Fixture.away_team.ilike(term)))
-        query = query.order_by(Fixture.date.desc())
+        query = query.order_by(nullslast(Fixture.date.desc()))
         rows = session.scalars(query.offset(offset).limit(limit)).all()
         items = [_fixture_payload(session, row) for row in rows]
         market = request.args.get("market")
@@ -548,13 +553,30 @@ def api_players_search():
     q = request.args.get("q", "").strip()
     limit, offset = _pagination(default_limit=20)
     with session:
-        query = select(Player)
+        query = (
+            select(
+                Player,
+                Team,
+                func.count(PlayerStat.id).label("stats_count"),
+                func.coalesce(func.sum(PlayerStat.goals), 0).label("goals"),
+                func.coalesce(func.sum(PlayerStat.assists), 0).label("assists"),
+                func.coalesce(func.sum(PlayerStat.shots), 0).label("shots"),
+                func.coalesce(func.sum(PlayerStat.minutes), 0).label("minutes"),
+                func.avg(PlayerStat.rating).label("rating"),
+            )
+            .outerjoin(Team, Team.id == Player.team_id)
+            .outerjoin(PlayerStat, PlayerStat.player_id == Player.id)
+            .group_by(Player.id, Team.id)
+        )
         if q:
             query = query.where(Player.name.ilike(f"%{q}%"))
-        rows = session.scalars(query.order_by(Player.name.asc()).offset(offset).limit(limit)).all()
+        rows = session.execute(
+            query.order_by(func.count(PlayerStat.id).desc(), Player.name.asc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
         items = []
-        for row in rows:
-            team = session.get(Team, row.team_id) if row.team_id else None
+        for row, team, stats_count, goals, assists, shots, minutes, rating in rows:
             items.append({
                 "id": row.id,
                 "name": row.name,
@@ -564,6 +586,13 @@ def api_players_search():
                 "position": row.position,
                 "nationality": row.nationality,
                 "photo": _player_photo_url(row.id),
+                "stats_count": int(stats_count or 0),
+                "matches_played": int(stats_count or 0),
+                "minutes": int(minutes or 0),
+                "goals": int(goals or 0),
+                "assists": int(assists or 0),
+                "shots": int(shots or 0),
+                "rating": round(float(rating), 2) if rating is not None else None,
             })
         return jsonify({"available": True, "limit": limit, "offset": offset, "items": items})
 
@@ -573,7 +602,7 @@ def _latest_player_stat(session, player_id: int) -> PlayerStat | None:
         select(PlayerStat)
         .join(Fixture, Fixture.id == PlayerStat.fixture_id)
         .where(PlayerStat.player_id == player_id)
-        .order_by(Fixture.date.desc())
+        .order_by(nullslast(Fixture.date.desc()))
         .limit(1)
     )
 
@@ -594,6 +623,24 @@ def _sum_numbers(rows, attr: str):
 def _avg_numbers(rows, attr: str):
     values = [getattr(row, attr) for row in rows if getattr(row, attr) is not None]
     return round(sum(values) / len(values), 2) if values else None
+
+
+def _player_stats_summary(stats: list[PlayerStat]) -> dict:
+    return {
+        "stats_count": len(stats),
+        "matches_played": _sum_numbers(stats, "appearances") or len(stats) or None,
+        "minutes": _sum_numbers(stats, "minutes"),
+        "goals": _sum_numbers(stats, "goals"),
+        "assists": _sum_numbers(stats, "assists"),
+        "shots": _sum_numbers(stats, "shots"),
+        "shots_on_target": _sum_numbers(stats, "shots_on_target"),
+        "fouls_committed": _sum_numbers(stats, "fouls_committed"),
+        "fouls_drawn": _sum_numbers(stats, "fouls_drawn"),
+        "yellow_cards": _sum_numbers(stats, "yellow_cards"),
+        "red_cards": _sum_numbers(stats, "red_cards"),
+        "saves": _sum_numbers(stats, "saves"),
+        "rating": _avg_numbers(stats, "rating"),
+    }
 
 
 def _score_for_team(fixture: Fixture, team_name: str) -> dict:
@@ -658,8 +705,9 @@ def api_player_detail(player_id: int):
             select(PlayerStat)
             .join(Fixture, Fixture.id == PlayerStat.fixture_id)
             .where(PlayerStat.player_id == player_id)
-            .order_by(Fixture.date.desc())
+            .order_by(nullslast(Fixture.date.desc()))
         ).all()
+        stats_summary = _player_stats_summary(stats)
         injuries = session.scalars(select(InjuryReport).where(InjuryReport.player_id == player_id).order_by(InjuryReport.reported_at.desc())).all()
         return jsonify({
             "available": True,
@@ -681,22 +729,11 @@ def api_player_detail(player_id: int):
                 "photo_url": _player_photo_url(player.id),
                 "league": team.league if team else None,
                 "season": None,
-                "matches_played": _sum_numbers(stats, "appearances") or len(stats) or None,
-                "minutes": _sum_numbers(stats, "minutes"),
-                "goals": _sum_numbers(stats, "goals"),
-                "assists": _sum_numbers(stats, "assists"),
-                "shots": _sum_numbers(stats, "shots"),
-                "shots_on_target": _sum_numbers(stats, "shots_on_target"),
+                **stats_summary,
                 "passes": None,
                 "key_passes": None,
-                "fouls_committed": _sum_numbers(stats, "fouls_committed"),
-                "fouls_drawn": _sum_numbers(stats, "fouls_drawn"),
-                "yellow_cards": _sum_numbers(stats, "yellow_cards"),
-                "red_cards": _sum_numbers(stats, "red_cards"),
-                "saves": _sum_numbers(stats, "saves"),
                 "corners_generated": None,
                 "offsides": None,
-                "rating": _avg_numbers(stats, "rating"),
                 "injuries": [
                     {
                         "fixture_id": row.fixture_id,
@@ -727,7 +764,7 @@ def api_player_last_matches(player_id: int):
             select(PlayerStat, Fixture)
             .join(Fixture, Fixture.id == PlayerStat.fixture_id)
             .where(PlayerStat.player_id == player_id)
-            .order_by(Fixture.date.desc())
+            .order_by(nullslast(Fixture.date.desc()))
             .limit(limit)
         ).all()
         items = []
@@ -798,20 +835,35 @@ def api_teams_search():
     q = request.args.get("q", "").strip()
     limit, offset = _pagination(default_limit=20)
     with session:
-        query = select(Team)
+        query = (
+            select(
+                Team,
+                func.count(distinct(Player.id)).label("player_count"),
+                func.count(distinct(TeamStat.id)).label("stats_count"),
+            )
+            .outerjoin(Player, Player.team_id == Team.id)
+            .outerjoin(TeamStat, TeamStat.team_id == Team.id)
+            .group_by(Team.id)
+        )
         if q:
             query = query.where(Team.name.ilike(f"%{q}%"))
-        rows = session.scalars(query.order_by(Team.name.asc()).offset(offset).limit(limit)).all()
+        rows = session.execute(
+            query.order_by(func.count(distinct(Player.id)).desc(), Team.name.asc())
+            .offset(offset)
+            .limit(limit)
+        ).all()
         return jsonify({
             "available": True,
             "items": [
                 {
-                    "id": row.id,
-                    "name": row.name,
-                    "league": row.league,
-                    "crest": _team_crest_url(row.id),
+                    "id": team.id,
+                    "name": team.name,
+                    "league": team.league,
+                    "crest": _team_crest_url(team.id),
+                    "player_count": int(player_count or 0),
+                    "stats_count": int(stats_count or 0),
                 }
-                for row in rows
+                for team, player_count, stats_count in rows
             ],
         })
 
@@ -830,7 +882,7 @@ def api_team_detail(team_id: int):
         fixtures = session.scalars(
             select(Fixture)
             .where(or_(Fixture.home_team == team.name, Fixture.away_team == team.name))
-            .order_by(Fixture.date.desc())
+            .order_by(nullslast(Fixture.date.desc()))
             .limit(20)
         ).all()
         predictions = session.scalars(
@@ -957,7 +1009,7 @@ def api_global_search():
         fixtures = session.scalars(
             select(Fixture)
             .where(or_(Fixture.home_team.ilike(term), Fixture.away_team.ilike(term), Fixture.league.ilike(term)))
-            .order_by(Fixture.date.desc())
+            .order_by(nullslast(Fixture.date.desc()))
             .limit(6)
         ).all()
         items = []

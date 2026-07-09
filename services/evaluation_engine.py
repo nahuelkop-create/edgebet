@@ -7,7 +7,7 @@ from typing import Any
 from sqlalchemy import distinct, func, select
 
 from db.connection import get_session
-from db.models import Fixture, ModelPerformance, Prediction, TeamStat
+from db.models import Fixture, ModelPerformance, Player, PlayerStat, Prediction, Team, TeamStat
 
 
 def _safe_probability(value: float | None) -> float:
@@ -304,6 +304,9 @@ def get_postgres_stats() -> dict[str, Any]:
             "error": str(exc),
             "fixtures": 0,
             "fixtures_with_stats": 0,
+            "teams": 0,
+            "players": 0,
+            "player_stats": 0,
             "predictions_total": 0,
             "predictions_settled": 0,
         }
@@ -311,6 +314,9 @@ def get_postgres_stats() -> dict[str, Any]:
     with session:
         fixtures = session.scalar(select(func.count(Fixture.id))) or 0
         fixtures_with_stats = session.scalar(select(func.count(distinct(TeamStat.fixture_id)))) or 0
+        teams = session.scalar(select(func.count(Team.id))) or 0
+        players = session.scalar(select(func.count(Player.id))) or 0
+        player_stats = session.scalar(select(func.count(PlayerStat.id))) or 0
         predictions_total = session.scalar(select(func.count(Prediction.id))) or 0
         predictions_settled = session.scalar(
             select(func.count(Prediction.id)).where(Prediction.correct.is_not(None))
@@ -319,6 +325,9 @@ def get_postgres_stats() -> dict[str, Any]:
             "available": True,
             "fixtures": int(fixtures),
             "fixtures_with_stats": int(fixtures_with_stats),
+            "teams": int(teams),
+            "players": int(players),
+            "player_stats": int(player_stats),
             "predictions_total": int(predictions_total),
             "predictions_settled": int(predictions_settled),
         }
